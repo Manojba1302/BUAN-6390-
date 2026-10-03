@@ -1,0 +1,1065 @@
+{
+  "version": "1.1.0-homeflow",
+  "note": "The form is data, not code. The front end renders from this and the back end validates against it, so a new field needs no change in either.",
+  "option_sets": {
+    "state": [
+      "AK",
+      "AL",
+      "AR",
+      "AZ",
+      "CA",
+      "CO",
+      "CT",
+      "DC",
+      "DE",
+      "FL",
+      "GA",
+      "GU",
+      "HI",
+      "IA",
+      "ID",
+      "IL",
+      "IN",
+      "KS",
+      "KY",
+      "LA",
+      "MA",
+      "MD",
+      "ME",
+      "MI",
+      "MN",
+      "MO",
+      "MS",
+      "MT",
+      "NC",
+      "ND",
+      "NE",
+      "NH",
+      "NJ",
+      "NM",
+      "NV",
+      "NY",
+      "OH",
+      "OK",
+      "OR",
+      "PA",
+      "PR",
+      "RI",
+      "SC",
+      "SD",
+      "TN",
+      "TX",
+      "UT",
+      "VA",
+      "VI",
+      "VT",
+      "WA",
+      "WI",
+      "WV",
+      "WY"
+    ],
+    "loan_purpose": [
+      {
+        "value": "Purchase",
+        "label": "Buy a home",
+        "hint": "I found a place, or I am looking"
+      },
+      {
+        "value": "NoCash-Out Refinance",
+        "label": "Lower my rate",
+        "hint": "Refinance without taking cash out"
+      },
+      {
+        "value": "Cash-Out Refinance",
+        "label": "Take cash out",
+        "hint": "Refinance and borrow against my equity"
+      },
+      {
+        "value": "Other",
+        "label": "Home equity line",
+        "hint": "Keep my mortgage, add a line of credit"
+      }
+    ],
+    "loan_type": [
+      "Conventional",
+      "FHA",
+      "VA",
+      "USDA-RHS"
+    ],
+    "property_type": [
+      "Single Family Residence",
+      "Single Family Residence with Home Owners Association",
+      "Condominium",
+      "Townhouse",
+      "2+ Units",
+      "Co-Operative",
+      "Manufactured/Mobile Home (Single Wide)",
+      "Manufactured/Mobile Home (Multiwide)"
+    ],
+    "property_use": [
+      {
+        "value": "Primary Home",
+        "label": "I will live here",
+        "hint": "My main home"
+      },
+      {
+        "value": "Secondary Home",
+        "label": "Second home",
+        "hint": "A holiday or weekend place"
+      },
+      {
+        "value": "Investment Home",
+        "label": "Investment",
+        "hint": "I plan to rent it out"
+      }
+    ],
+    "citizenship": [
+      "U.S. Citizen",
+      "Permanent Resident Alien",
+      "Non-Permanent Resident Alien"
+    ],
+    "marital_status": [
+      "Married",
+      "Unmarried (single, divorced, widowed)",
+      "Separated"
+    ],
+    "housing": [
+      "Own",
+      "Rent",
+      "No primary housing expense"
+    ],
+    "estate": [
+      "Fee Simple",
+      "Leasehold"
+    ],
+    "title_manner": [
+      "Sole Ownership",
+      "Joint Tenancy with Right of Survivorship",
+      "Life Estate",
+      "Tenancy by the Entirety",
+      "Tenancy in Common",
+      "Other"
+    ],
+    "asset_type": [
+      "Checking Account",
+      "Savings Account",
+      "Certificate of Deposit",
+      "Money Market Fund",
+      "Mutual Funds",
+      "Stock",
+      "Retirement Funds",
+      "Gift of Cash",
+      "Cash On Hand",
+      "Trust Account",
+      "Other Asset"
+    ],
+    "liability_type": [
+      "Revolving",
+      "Installment",
+      "Mortgage",
+      "HELOC",
+      "Lease Payments",
+      "Open 30 Days Charge Account",
+      "Child Care",
+      "Taxes",
+      "Collections Judgments And Liens",
+      "Other Liability"
+    ],
+    "unit_type": [
+      "Apartment",
+      "Basement",
+      "Building",
+      "Condo",
+      "Floor",
+      "Lot",
+      "Lower",
+      "Office",
+      "Penthouse",
+      "Rear",
+      "Room",
+      "Side",
+      "Space",
+      "Suite",
+      "Trailer",
+      "Unit",
+      "Upper"
+    ],
+    "employment_status": [
+      {
+        "value": "Employed",
+        "label": "Employed",
+        "hint": "Salary, hourly pay or multiple jobs"
+      },
+      {
+        "value": "Self-employed",
+        "label": "Self-employed",
+        "hint": "Your business or freelance work"
+      },
+      {
+        "value": "Retired",
+        "label": "Retired",
+        "hint": "Pension, retirement and benefits"
+      },
+      {
+        "value": "Not currently employed",
+        "label": "Not currently employed",
+        "hint": "Other income or no current income"
+      },
+      {
+        "value": "Other",
+        "label": "Other situation",
+        "hint": "Tell us how you receive income"
+      }
+    ],
+    "income_source": [
+      "Pension",
+      "Social Security",
+      "Retirement distributions",
+      "Rental income",
+      "Investment income",
+      "Disability benefits",
+      "Other"
+    ]
+  },
+  "steps": [
+    {
+      "id": "start",
+      "label": "Get started",
+      "title": "Let’s make your next move happen.",
+      "lede": "Start with your plans and a few details about you. You can move between sections as you gather the information you need.",
+      "groups": [
+        {
+          "title": "What are you doing?",
+          "fields": [
+            "loanPurpose"
+          ]
+        },
+        {
+          "title": "About you",
+          "fields": [
+            "firstName",
+            "lastName",
+            "email",
+            "phone"
+          ]
+        },
+        {
+          "title": "The property",
+          "fields": [
+            "propertyValue",
+            "propertyState",
+            "downPayment"
+          ],
+          "computed": [
+            {
+              "id": "loanAmount",
+              "label": "Estimated loan amount",
+              "formula": "propertyValue - downPayment"
+            }
+          ]
+        },
+        {
+          "title": "Your employment situation",
+          "fields": [
+            "employmentStatus"
+          ],
+          "hint": "This helps us show the income questions and document requests that apply to you."
+        }
+      ]
+    },
+    {
+      "id": "documents",
+      "label": "Documents",
+      "title": "Your documents",
+      "lede": "Choose a document type, then select a file to preview. The current prototype sends files to the server for classification when selected.",
+      "groups": []
+    },
+    {
+      "id": "about",
+      "label": "About you",
+      "title": "About you",
+      "lede": "Your personal details, kept clear and easy to review. Sensitive numbers show only their last four digits by default.",
+      "groups": [
+        {
+          "title": "Your details",
+          "fields": [
+            "dob",
+            "ssn",
+            "citizenship",
+            "maritalStatus",
+            "dependents"
+          ]
+        },
+        {
+          "title": "Where you live now",
+          "fields": [
+            "addr1",
+            "city",
+            "state",
+            "zip",
+            "housing",
+            "yearsAt",
+            "rent"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "property",
+      "label": "Property",
+      "title": "The property and the loan",
+      "lede": "Tell us about the home itself. If you have not chosen one yet, give us the area and we will update it later.",
+      "groups": [
+        {
+          "title": "Property address",
+          "fields": [
+            "propAddr1",
+            "propCity",
+            "propState",
+            "propZip",
+            "yearBuilt"
+          ]
+        },
+        {
+          "title": "How will you use it?",
+          "fields": [
+            "propertyUse",
+            "propertyType"
+          ]
+        },
+        {
+          "title": "Title",
+          "hint": "Your closing agent will confirm these. A best guess is fine for now.",
+          "fields": [
+            "estateHeld",
+            "titleManner"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "money",
+      "label": "Income & finances",
+      "title": "Your work. Your income. Your future.",
+      "lede": "Everyone’s income looks different. Choose your current situation and we’ll show the details that apply to you. You can include other income you want considered.",
+      "groups": [
+        {
+          "title": "Which situation describes you?",
+          "fields": [
+            "employmentStatus"
+          ],
+          "hint": "Changing your selection keeps your other answers available if you switch back."
+        },
+        {
+          "title": "Employment and gross monthly income",
+          "repeatable": "employment",
+          "visible_if": {
+            "field": "employmentStatus",
+            "equals": "Employed"
+          }
+        },
+        {
+          "title": "Your business",
+          "visible_if": {
+            "field": "employmentStatus",
+            "equals": "Self-employed"
+          },
+          "fields": [
+            "businessName",
+            "businessType",
+            "businessStartDate",
+            "ownershipPercent",
+            "businessPhone",
+            "businessAddress",
+            "selfEmploymentIncome"
+          ],
+          "hint": "Enter net business income after business expenses. Your loan officer will review the supporting information."
+        },
+        {
+          "title": "Retirement and benefits",
+          "visible_if": {
+            "field": "employmentStatus",
+            "equals": "Retired"
+          },
+          "fields": [
+            "retirementDate",
+            "pensionProvider",
+            "pensionIncome",
+            "socialSecurityIncome",
+            "retirementIncome"
+          ],
+          "hint": "No employer details are needed. Include only income you want considered."
+        },
+        {
+          "title": "Your current income",
+          "visible_if": {
+            "field": "employmentStatus",
+            "equals": "Not currently employed"
+          },
+          "fields": [
+            "lastEmploymentDate",
+            "notEmployedIncome"
+          ],
+          "hint": "You can enter zero if you have no current income. Add other sources below if applicable."
+        },
+        {
+          "title": "Tell us about your situation",
+          "visible_if": {
+            "field": "employmentStatus",
+            "equals": "Other"
+          },
+          "fields": [
+            "otherSituation",
+            "otherSituationIncome"
+          ]
+        },
+        {
+          "title": "Additional gross monthly income",
+          "fields": [
+            "additionalIncomeSource",
+            "additionalIncomeAmount"
+          ],
+          "hint": "Include only income you want considered. Alimony, child support and separate maintenance income need not be revealed unless you want it considered."
+        },
+        {
+          "title": "Current monthly housing expenses",
+          "fields": [
+            "exp_firstMortgage",
+            "exp_hazard",
+            "exp_taxes",
+            "exp_mi",
+            "exp_hoa",
+            "exp_other"
+          ],
+          "computed": [
+            {
+              "id": "housingTotal",
+              "label": "Total",
+              "formula": "sum(exp_*)"
+            }
+          ]
+        },
+        {
+          "title": "Accounts and assets",
+          "repeatable": "asset"
+        },
+        {
+          "title": "Debts and other monthly payments",
+          "repeatable": "liability"
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "label": "Review",
+      "title": "Check it, then send it",
+      "lede": "Everything you have given us, in one place. Anything still outstanding is marked.",
+      "groups": [
+        {
+          "title": "Electronic documents",
+          "fields": [
+            "econsent"
+          ]
+        },
+        {
+          "title": "Declarations",
+          "declarations": true
+        }
+      ]
+    }
+  ],
+  "fields": {
+    "loanPurpose": {
+      "label": "Loan purpose",
+      "widget": "cards",
+      "options": "loan_purpose",
+      "required": true,
+      "step": "start"
+    },
+    "firstName": {
+      "label": "First name",
+      "widget": "text",
+      "required": true,
+      "step": "start"
+    },
+    "lastName": {
+      "label": "Last name",
+      "widget": "text",
+      "required": true,
+      "step": "start"
+    },
+    "email": {
+      "label": "Email",
+      "widget": "email",
+      "required": true,
+      "help": "We send your application updates here",
+      "step": "start"
+    },
+    "phone": {
+      "label": "Mobile phone",
+      "widget": "phone",
+      "placeholder": "(555) 555-5555",
+      "step": "start"
+    },
+    "propertyValue": {
+      "label": "Estimated property value",
+      "widget": "currency",
+      "required": true,
+      "step": "start"
+    },
+    "downPayment": {
+      "label": "Down payment",
+      "widget": "currency",
+      "step": "start"
+    },
+    "propertyState": {
+      "label": "Property state",
+      "widget": "select",
+      "options": "state",
+      "required": true,
+      "step": "start"
+    },
+    "dob": {
+      "label": "Date of birth",
+      "widget": "date",
+      "required": true,
+      "step": "about"
+    },
+    "ssn": {
+      "label": "Social Security number",
+      "widget": "ssn",
+      "required": true,
+      "sensitive": true,
+      "placeholder": "",
+      "step": "about",
+      "help": ""
+    },
+    "citizenship": {
+      "label": "Citizenship",
+      "widget": "select",
+      "options": "citizenship",
+      "required": true,
+      "step": "about"
+    },
+    "maritalStatus": {
+      "label": "Marital status",
+      "widget": "select",
+      "options": "marital_status",
+      "required": true,
+      "step": "about"
+    },
+    "dependents": {
+      "label": "Number of dependents",
+      "widget": "number",
+      "step": "about"
+    },
+    "addr1": {
+      "label": "Street address",
+      "widget": "text",
+      "required": true,
+      "step": "about"
+    },
+    "city": {
+      "label": "City",
+      "widget": "text",
+      "required": true,
+      "step": "about"
+    },
+    "state": {
+      "label": "State",
+      "widget": "select",
+      "options": "state",
+      "required": true,
+      "step": "about"
+    },
+    "zip": {
+      "label": "ZIP code",
+      "widget": "zip",
+      "required": true,
+      "placeholder": "75080",
+      "step": "about"
+    },
+    "housing": {
+      "label": "Do you own or rent?",
+      "widget": "select",
+      "options": "housing",
+      "required": true,
+      "step": "about"
+    },
+    "yearsAt": {
+      "label": "Years at this address",
+      "widget": "number",
+      "step": "about"
+    },
+    "rent": {
+      "label": "Monthly rent",
+      "widget": "currency",
+      "visible_if": {
+        "field": "housing",
+        "equals": "Rent"
+      },
+      "step": "about"
+    },
+    "legalName": {
+      "label": "Name as printed on your ID",
+      "widget": "text",
+      "step": "about"
+    },
+    "propAddr1": {
+      "label": "Street address",
+      "widget": "text",
+      "required": true,
+      "step": "property"
+    },
+    "propCity": {
+      "label": "City",
+      "widget": "text",
+      "required": true,
+      "step": "property"
+    },
+    "propState": {
+      "label": "State",
+      "widget": "select",
+      "options": "state",
+      "required": true,
+      "step": "property"
+    },
+    "propZip": {
+      "label": "ZIP code",
+      "widget": "zip",
+      "required": true,
+      "step": "property"
+    },
+    "propertyType": {
+      "label": "Property type",
+      "widget": "select",
+      "options": "property_type",
+      "required": true,
+      "step": "property"
+    },
+    "propertyUse": {
+      "label": "How will you use it?",
+      "widget": "cards",
+      "options": "property_use",
+      "required": true,
+      "step": "property"
+    },
+    "yearBuilt": {
+      "label": "Year built",
+      "widget": "number",
+      "placeholder": "1998",
+      "step": "property"
+    },
+    "estateHeld": {
+      "label": "Estate will be held in",
+      "widget": "select",
+      "options": "estate",
+      "step": "property"
+    },
+    "titleManner": {
+      "label": "Manner in which title will be held",
+      "widget": "select",
+      "options": "title_manner",
+      "step": "property"
+    },
+    "exp_firstMortgage": {
+      "label": "First mortgage principal and interest",
+      "widget": "currency",
+      "step": "money",
+      "allow_zero": true
+    },
+    "exp_hazard": {
+      "label": "Hazard insurance",
+      "widget": "currency",
+      "step": "money",
+      "allow_zero": true
+    },
+    "exp_taxes": {
+      "label": "Real estate taxes",
+      "widget": "currency",
+      "step": "money",
+      "allow_zero": true
+    },
+    "exp_mi": {
+      "label": "Mortgage insurance",
+      "widget": "currency",
+      "step": "money",
+      "allow_zero": true
+    },
+    "exp_hoa": {
+      "label": "Homeowners association",
+      "widget": "currency",
+      "step": "money",
+      "allow_zero": true
+    },
+    "exp_other": {
+      "label": "Other housing expenses",
+      "widget": "currency",
+      "step": "money",
+      "allow_zero": true
+    },
+    "econsent": {
+      "label": "Electronic documents",
+      "widget": "agree",
+      "required": true,
+      "step": "review"
+    },
+    "employmentStatus": {
+      "label": "Current employment situation",
+      "widget": "cards",
+      "step": "start",
+      "required": true,
+      "options": "employment_status"
+    },
+    "businessName": {
+      "label": "Business or trade name",
+      "widget": "text",
+      "step": "money",
+      "required": true,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Self-employed"
+      }
+    },
+    "businessType": {
+      "label": "Type of business",
+      "widget": "text",
+      "step": "money",
+      "required": true,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Self-employed"
+      }
+    },
+    "businessStartDate": {
+      "label": "Business start date",
+      "widget": "date",
+      "step": "money",
+      "required": true,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Self-employed"
+      }
+    },
+    "ownershipPercent": {
+      "label": "Ownership percentage",
+      "widget": "number",
+      "step": "money",
+      "required": true,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Self-employed"
+      },
+      "help": "Enter a number from 0 to 100."
+    },
+    "businessPhone": {
+      "label": "Business phone",
+      "widget": "phone",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Self-employed"
+      }
+    },
+    "businessAddress": {
+      "label": "Business address",
+      "widget": "text",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Self-employed"
+      }
+    },
+    "selfEmploymentIncome": {
+      "label": "Average net monthly business income",
+      "widget": "currency",
+      "step": "money",
+      "required": true,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Self-employed"
+      },
+      "allow_zero": true
+    },
+    "retirementDate": {
+      "label": "Retirement date",
+      "widget": "date",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Retired"
+      }
+    },
+    "pensionProvider": {
+      "label": "Pension or retirement provider",
+      "widget": "text",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Retired"
+      }
+    },
+    "pensionIncome": {
+      "label": "Monthly pension income",
+      "widget": "currency",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Retired"
+      },
+      "allow_zero": true
+    },
+    "socialSecurityIncome": {
+      "label": "Monthly Social Security income",
+      "widget": "currency",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Retired"
+      },
+      "allow_zero": true
+    },
+    "retirementIncome": {
+      "label": "Monthly retirement distributions",
+      "widget": "currency",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Retired"
+      },
+      "allow_zero": true
+    },
+    "lastEmploymentDate": {
+      "label": "Last employment date",
+      "widget": "date",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Not currently employed"
+      }
+    },
+    "notEmployedIncome": {
+      "label": "Monthly income to consider, if any",
+      "widget": "currency",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Not currently employed"
+      },
+      "allow_zero": true
+    },
+    "otherSituation": {
+      "label": "Describe your employment or income situation",
+      "widget": "text",
+      "step": "money",
+      "required": true,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Other"
+      }
+    },
+    "otherSituationIncome": {
+      "label": "Gross monthly income, if any",
+      "widget": "currency",
+      "step": "money",
+      "required": false,
+      "visible_if": {
+        "field": "employmentStatus",
+        "equals": "Other"
+      },
+      "allow_zero": true
+    },
+    "additionalIncomeSource": {
+      "label": "Additional income source",
+      "widget": "select",
+      "step": "money",
+      "required": false,
+      "options": "income_source"
+    },
+    "additionalIncomeAmount": {
+      "label": "Additional gross monthly income",
+      "widget": "currency",
+      "step": "money",
+      "required": false,
+      "allow_zero": true
+    }
+  },
+  "repeatables": {
+    "employment": {
+      "label": "Employer",
+      "add_label": "Add your employer",
+      "add_another_label": "Add another employer",
+      "hint": "If you have been in this job under two years, add the one before it as well.",
+      "fields": [
+        {
+          "id": "employer_name",
+          "label": "Employer name",
+          "widget": "text",
+          "required": true
+        },
+        {
+          "id": "position",
+          "label": "Position",
+          "widget": "text"
+        },
+        {
+          "id": "start_date",
+          "label": "Start date",
+          "widget": "date"
+        },
+        {
+          "id": "base",
+          "label": "Base monthly income",
+          "widget": "currency"
+        },
+        {
+          "id": "overtime",
+          "label": "Overtime",
+          "widget": "currency"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "widget": "currency"
+        },
+        {
+          "id": "address",
+          "label": "Employer address",
+          "widget": "text"
+        },
+        {
+          "id": "commissions",
+          "label": "Monthly commissions",
+          "widget": "currency"
+        }
+      ]
+    },
+    "asset": {
+      "label": "Account",
+      "add_label": "Add an account",
+      "add_another_label": "Add another account",
+      "fields": [
+        {
+          "id": "asset_type",
+          "label": "Type",
+          "widget": "select",
+          "options": "asset_type",
+          "required": true
+        },
+        {
+          "id": "institution",
+          "label": "Institution",
+          "widget": "text"
+        },
+        {
+          "id": "account_mask",
+          "label": "Account ending",
+          "widget": "text",
+          "placeholder": "6612"
+        },
+        {
+          "id": "balance",
+          "label": "Balance",
+          "widget": "currency"
+        }
+      ]
+    },
+    "liability": {
+      "label": "Debt",
+      "add_label": "Add a debt",
+      "add_another_label": "Add another debt",
+      "hint": "Car loans, student loans, credit cards, child support.",
+      "fields": [
+        {
+          "id": "liability_type",
+          "label": "Type",
+          "widget": "select",
+          "options": "liability_type",
+          "required": true
+        },
+        {
+          "id": "creditor",
+          "label": "Creditor",
+          "widget": "text"
+        },
+        {
+          "id": "balance",
+          "label": "Balance",
+          "widget": "currency"
+        },
+        {
+          "id": "monthly_payment",
+          "label": "Monthly payment",
+          "widget": "currency"
+        }
+      ]
+    }
+  },
+  "declarations": [
+    {
+      "code": "A",
+      "text": "Will you occupy the property as your primary residence?"
+    },
+    {
+      "code": "B",
+      "text": "If this is a purchase: do you have a family relationship or business affiliation with the seller?"
+    },
+    {
+      "code": "C",
+      "text": "Are you borrowing any money for this transaction that you have not disclosed on this application?"
+    },
+    {
+      "code": "D1",
+      "text": "Have you or will you be applying for a mortgage on another property before closing this one?"
+    },
+    {
+      "code": "D2",
+      "text": "Have you or will you be applying for any new credit before closing this loan?"
+    },
+    {
+      "code": "E",
+      "text": "Will this property be subject to a lien that could take priority over the first mortgage?"
+    },
+    {
+      "code": "F",
+      "text": "Are you a co-signer or guarantor on any debt not disclosed on this application?"
+    },
+    {
+      "code": "G",
+      "text": "Are there any outstanding judgments against you?"
+    },
+    {
+      "code": "H",
+      "text": "Are you currently delinquent or in default on a federal debt?"
+    },
+    {
+      "code": "I",
+      "text": "Are you a party to a lawsuit in which you may have personal financial liability?"
+    },
+    {
+      "code": "J",
+      "text": "Have you conveyed title to any property in lieu of foreclosure in the past 7 years?"
+    },
+    {
+      "code": "K",
+      "text": "In the past 7 years, have you completed a pre-foreclosure or short sale?"
+    },
+    {
+      "code": "L",
+      "text": "Have you had property foreclosed upon in the last 7 years?"
+    },
+    {
+      "code": "M",
+      "text": "Have you declared bankruptcy within the past 7 years?"
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+name: homeflow
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-homeflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-homeflow}
+      POSTGRES_DB: ${POSTGRES_DB:-homeflow}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-homeflow} -d ${POSTGRES_DB:-homeflow}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-homeflow}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-homeflow}
+    ports:
+      - "127.0.0.1:${QUEUE_PORT:-5672}:5672"
+      - "127.0.0.1:${QUEUE_UI_PORT:-15672}:15672"   # management UI, handy during the demo
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    build: ./infra/minio
+    image: homeflow-storage:local
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-homeflow}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-homeflow123}
+    ports:
+      - "127.0.0.1:${STORAGE_PORT:-9000}:9000"
+      - "127.0.0.1:${STORAGE_UI_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-homeflow}:${POSTGRES_PASSWORD:-homeflow}@db:5432/${POSTGRES_DB:-homeflow}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-homeflow}:${RABBITMQ_PASSWORD:-homeflow}@rabbitmq:5672/
+      S3_ENDPOINT: http://minio:9000
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      PYTHONPATH: /srv/shared
+      SHARED_DIR: /srv/shared
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      minio: {condition: service_started}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/srv/app
+      - ./shared:/srv/shared:ro
+
+  worker:
+    build: ./worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-homeflow}:${POSTGRES_PASSWORD:-homeflow}@db:5432/${POSTGRES_DB:-homeflow}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-homeflow}:${RABBITMQ_PASSWORD:-homeflow}@rabbitmq:5672/
+      S3_ENDPOINT: http://minio:9000
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      PYTHONPATH: /srv/worker:/srv/shared
+      SHARED_DIR: /srv/shared
+      MARKDOWN_DIR: /srv/markdown
+    depends_on:
+      db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      minio: {condition: service_started}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./worker:/srv/worker
+      - ./shared:/srv/shared:ro
+      - markdown-data:/srv/markdown
+
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000/api/v1}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/srv/web
+      - /srv/web/node_modules
+
+  # Optional: run Ollama in Docker instead of on your machine.
+  #   docker compose --profile models up -d ollama
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["models"]
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11435}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+volumes:
+  db-data:
+  minio-data:
+  markdown-data:
+  ollama-data:
+
+
+

@@ -1,0 +1,147 @@
+{
+  "version": "1.0.0",
+  "note": "Single source of truth for both the API (stage 1 classification) and the worker (stage 2 classification and extraction). Mounted read-only into both containers.",
+  "types": [
+    {
+      "id": "paystub",
+      "display_name": "Pay stub",
+      "definition": "A pay-period earnings statement from an employer showing gross pay, net pay and deductions for one pay period.",
+      "signals": [
+        "the words Earnings Statement or Pay Statement",
+        "a pay period with a start and an end date",
+        "Gross Pay and Net Pay",
+        "a year-to-date or YTD column",
+        "an itemised deductions block"
+      ],
+      "regex": [
+        "(?i)gross\\s+pay",
+        "(?i)net\\s+pay",
+        "(?i)year[- ]to[- ]date|\\bYTD\\b",
+        "(?i)pay\\s+period"
+      ],
+      "regex_min_hits": 2,
+      "extract": {
+        "employee_name": "Full name of the employee the stub belongs to",
+        "employer_name": "Name of the employing company",
+        "pay_period_start": "First day of the pay period, YYYY-MM-DD",
+        "pay_period_end": "Last day of the pay period, YYYY-MM-DD",
+        "pay_date": "Date the pay was issued, YYYY-MM-DD",
+        "pay_frequency": "One of weekly, biweekly, semimonthly, monthly. Only if printed on the page.",
+        "gross_pay": "Gross pay for this period, digits only",
+        "net_pay": "Net pay for this period, digits only",
+        "ytd_gross": "Year-to-date gross earnings, digits only"
+      }
+    },
+    {
+      "id": "w2",
+      "display_name": "W-2",
+      "definition": "IRS Form W-2, the annual Wage and Tax Statement an employer issues to an employee.",
+      "signals": [
+        "the title Wage and Tax Statement",
+        "OMB No. 1545-0008",
+        "numbered boxes 1 to 20",
+        "Copy B To Be Filed With Employee's FEDERAL Tax Return",
+        "an employer EIN in the form 12-3456789"
+      ],
+      "regex": [
+        "(?i)wage\\s+and\\s+tax\\s+statement",
+        "1545-0008",
+        "(?i)box\\s*1|wages,\\s*tips",
+        "\\b\\d{2}-\\d{7}\\b"
+      ],
+      "regex_min_hits": 2,
+      "extract": {
+        "employee_name": "Employee name from box e",
+        "employee_ssn": "Social Security number from box a, format 123-45-6789",
+        "employer_name": "Employer name from box c",
+        "employer_ein": "Employer EIN from box b",
+        "tax_year": "Four digit tax year",
+        "box1_wages": "Box 1 wages, tips, other compensation, digits only",
+        "box2_federal_tax": "Box 2 federal income tax withheld, digits only"
+      }
+    },
+    {
+      "id": "bank_statement",
+      "display_name": "Bank statement",
+      "definition": "A periodic account statement from a bank or credit union showing balances and transactions for one statement period.",
+      "signals": [
+        "a financial institution name in the header",
+        "Statement Period with a date range",
+        "Beginning Balance and Ending Balance",
+        "a dated transaction table",
+        "a masked account number"
+      ],
+      "regex": [
+        "(?i)statement\\s+period",
+        "(?i)(beginning|opening)\\s+balance",
+        "(?i)(ending|closing)\\s+balance",
+        "(?i)account\\s+(number|ending)"
+      ],
+      "regex_min_hits": 2,
+      "extract": {
+        "account_holder": "Name the account is held in",
+        "institution": "Name of the bank or credit union",
+        "account_mask": "Last four digits of the account number only, as ****1234",
+        "period_start": "First day of the statement period, YYYY-MM-DD",
+        "period_end": "Last day of the statement period, YYYY-MM-DD",
+        "beginning_balance": "Opening balance, digits only",
+        "ending_balance": "Closing balance, digits only",
+        "total_deposits": "Total deposits or credits for the period, digits only",
+        "total_withdrawals": "Total withdrawals or debits for the period, digits only"
+      }
+    },
+    {
+      "id": "drivers_license",
+      "display_name": "Driver's license",
+      "definition": "A state-issued driver licence card bearing a portrait, a licence number and an expiry date.",
+      "signals": [
+        "a US state name across the top",
+        "the words DRIVER LICENSE or DRIVER'S LICENSE",
+        "labelled fields DLN, LIC, DOB, EXP, ISS or CLASS",
+        "a portrait photograph",
+        "landscape card orientation"
+      ],
+      "regex": [
+        "(?i)driver'?s?\\s+licen[sc]e",
+        "(?i)\\bDOB\\b",
+        "(?i)\\bEXP\\b",
+        "(?i)\\bCLASS\\b"
+      ],
+      "regex_min_hits": 2,
+      "extract": {
+        "full_name": "Full name as printed",
+        "date_of_birth": "Date of birth, YYYY-MM-DD",
+        "license_number": "Licence or DL number",
+        "address": "Street address line",
+        "city": "City",
+        "state": "Two letter state code",
+        "zip": "Five digit ZIP code",
+        "issue_date": "Issue date, YYYY-MM-DD",
+        "expiry_date": "Expiry date, YYYY-MM-DD"
+      }
+    },
+    {
+      "id": "ssn_card",
+      "display_name": "Social Security card",
+      "definition": "A United States Social Security card showing a name and a nine digit Social Security number.",
+      "signals": [
+        "SOCIAL SECURITY across the top",
+        "a nine digit number formatted 123-45-6789",
+        "THIS NUMBER HAS BEEN ESTABLISHED FOR",
+        "a signature line",
+        "no other personal data on the card"
+      ],
+      "regex": [
+        "(?i)social\\s+security",
+        "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+      ],
+      "regex_min_hits": 2,
+      "extract": {
+        "full_name": "Name exactly as printed on the card",
+        "ssn": "Social Security number, format 123-45-6789"
+      }
+    }
+  ],
+  "classification_prompt": "You are a document classifier for a mortgage lender. Look at the page and decide what kind of document it is.\n\nThe only categories you may answer with are:\n{{TYPE_LIST}}\n\nRules you must follow:\n- Decide only from what is printed on the page. You are given no filename and no hint about what the document is supposed to be.\n- If the page does not clearly match one of the categories, answer \"unknown\". Do not guess the closest one.\n- If you cannot read enough of the page to tell, set readable to false.\n- evidence must be short phrases copied exactly from the page that support your answer. Do not invent them.\n- Answer with one JSON object and nothing else. No explanation, no markdown fence.\n\nAnswer in exactly this shape:\n{\"document_type\": \"<one category id or unknown>\", \"readable\": true, \"evidence\": [\"<exact phrase from the page>\"], \"mixed_document\": false}",
+  "extraction_prompt": "You are reading a {{DISPLAY_NAME}} for a mortgage lender and pulling out specific fields.\n\nExtract exactly these fields:\n{{FIELD_LIST}}\n\nRules you must follow:\n- Copy values from the document. Never infer, complete or calculate a value that is not printed.\n- If a field is not on the page, set its value to null. A missing value must stay missing.\n- For every field you do return, give the exact line of text you read it from, and the page number.\n- Amounts are digits only, with no currency symbol and no thousands separator.\n- Dates are YYYY-MM-DD.\n- Answer with one JSON object and nothing else. No explanation, no markdown fence.\n\nAnswer in exactly this shape:\n{\"fields\": {\"<field_name>\": {\"value\": \"<value or null>\", \"page\": 1, \"quote\": \"<exact line from the document>\"}}}"
+}
