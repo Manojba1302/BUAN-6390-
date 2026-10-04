@@ -289,3 +289,9 @@ Account creation and password reset include a confirm-password field with live m
 The supplied Consumer_RE_Requirements_and_Flow.html (Application step 6 and rules R-UW-1/R-UW-3) specifies two latest paystubs, two years of W-2s and two months of bank statements per account for an owner-occupied W-2 purchase. The Oct 1 meeting notes additionally request Social Security card/driver’s-license categories and client-side preview before Submit. Build a multi.docx describes configurable checklists across products and tenants; it does not establish a universal three-month period.
 
 Checklist file counts are collection indicators. They do not yet verify distinct statement months, all accounts/pages, or W-2 tax-year coverage. A combined multi-period PDF may require manual review; automatic period-aware completeness remains separate work. The UI keeps configured guidance visible after upload and shows local previews for images/PDFs before server submission. Saved documents open through their existing detail view.
+
+## Docker naming and existing installations
+
+Fresh installations use the homeflow Compose project, HomeFlow service names and named persistent volumes for the database, storage, markdown and queue. RabbitMQ uses a stable hostname so queue data survives container recreation.
+
+For an existing installation, stop its old stack without deleting volumes before changing the project name. Set COMPOSE_PROJECT_NAME=homeflow in your private .env. To reuse existing volumes, set REUSE_DATA_VOLUMES=true and specify DB_VOLUME_NAME, STORAGE_VOLUME_NAME, MARKDOWN_VOLUME_NAME and QUEUE_VOLUME_NAME using the actual existing volume names. Preserve RABBITMQ_HOSTNAME when reusing an existing RabbitMQ data volume. All four external volumes must already exist. Fresh clones should leave these overrides unset. Never commit your private .env.

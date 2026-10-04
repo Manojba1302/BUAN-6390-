@@ -19,6 +19,9 @@ services:
       retries: 20
 
   rabbitmq:
+    hostname: ${RABBITMQ_HOSTNAME:-homeflow-queue}
+    volumes:
+      - queue-data:/var/lib/rabbitmq
     image: rabbitmq:3.13-management
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-homeflow}
@@ -118,9 +121,19 @@ services:
 
 volumes:
   db-data:
+    name: ${DB_VOLUME_NAME:-homeflow_db-data}
+    external: ${REUSE_DATA_VOLUMES:-false}
   minio-data:
+    name: ${STORAGE_VOLUME_NAME:-homeflow_minio-data}
+    external: ${REUSE_DATA_VOLUMES:-false}
   markdown-data:
+    name: ${MARKDOWN_VOLUME_NAME:-homeflow_markdown-data}
+    external: ${REUSE_DATA_VOLUMES:-false}
   ollama-data:
 
 
 
+
+  queue-data:
+    name: ${QUEUE_VOLUME_NAME:-homeflow_queue-data}
+    external: ${REUSE_DATA_VOLUMES:-false}
