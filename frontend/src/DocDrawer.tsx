@@ -72,7 +72,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
               {doc.classification && (
                 <span className={`chip ${doc.classification.outcome === "matched" ? "g" : "w"}`}>
                   <Icon name={doc.classification.outcome === "matched" ? "check" : "alert"} />
-                  {doc.classification.outcome === "matched" ? "Matched" : "Check this"}
+                  {doc.classification.outcome === "matched" ? "Type matched" : "Check this"}
                 </span>
               )}
               <button className="xbtn" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
@@ -98,8 +98,8 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                   <div className="banner" style={{ marginTop: 0 }}>
                     <Icon name="info" />
                     <div>
-                      <b>Still being read</b>
-                      This page fills in as soon as the document has been processed.
+                      <b>{doc.status === "failed" ? "Document processing failed" : "Still being read"}</b>
+                      {doc.status === "failed" ? "We could not finish reading this document. Please retry processing." : "This page fills in as soon as the document has been processed."}
                     </div>
                   </div>
                 )}
@@ -137,7 +137,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                   );
                 })}
 
-                {doc.missing_fields.length > 0 && (
+                {doc.status === "completed" && doc.missing_fields.length > 0 && (
                   <div className="missingbox">
                     <b><Icon name="alert" /> We could not find {doc.missing_fields.length} thing
                       {doc.missing_fields.length > 1 ? "s" : ""}</b>

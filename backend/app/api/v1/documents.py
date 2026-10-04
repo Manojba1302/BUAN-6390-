@@ -3,19 +3,20 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 from uuid import UUID
 
 import doc_types
 from fastapi import APIRouter, Depends, File as UploadField, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import current_customer
 from app.db.models import (
-    Application, Customer, DocumentMarkdown, Extraction, File, FileClassification,
+    Application, ApplicationField, Asset, Employment, Customer, DocumentMarkdown, Extraction, File, FileClassification,
 )
 from app.db.session import get_db
 from app.services import audit, classifier, queue, storage
@@ -199,11 +200,87 @@ def unlink(file_id: UUID, db: Session = Depends(get_db),
     """Unlink from the application. The file stays in the vault, as the
     customer's own copy, which is the whole point of having one."""
     row = _owned_file(db, file_id, customer)
+    _editable_link(db, row)
+    _clear_proposals(db, row)
     row.application_id = None
     audit.record(db, action="document.unlinked", customer_id=customer.customer_id,
                  file_id=file_id)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class LinkIn(BaseModel):
+    application_id: UUID
+
+
+def _editable_link(db: Session, row: File) -> None:
+    if row.application_id:
+        app = db.get(Application, row.application_id)
+        if app and app.status != "draft":
+            raise HTTPException(409, "Submitted application documents cannot be removed.")
+
+
+def _clear_proposals(db: Session, row: File) -> None:
+    """Remove unconfirmed proposals only; customer-owned values survive."""
+    if not row.application_id:
+        return
+    db.execute(delete(ApplicationField).where(
+        ApplicationField.application_id == row.application_id,
+        ApplicationField.file_id == row.file_id,
+        ApplicationField.review_state == "proposed"))
+    for model in (Employment, Asset):
+        db.execute(delete(model).where(model.application_id == row.application_id,
+                                       model.source_file_id == row.file_id))
+
+
+@router.post("/{file_id}/link")
+def link_document(file_id: UUID, body: LinkIn, db: Session = Depends(get_db),
+                  customer: Customer = Depends(current_customer)) -> dict:
+    row = _owned_file(db, file_id, customer)
+    app = db.get(Application, body.application_id)
+    if not app or app.customer_id != customer.customer_id:
+        raise HTTPException(404, "Application not found")
+    if app.status != "draft":
+        raise HTTPException(409, "Documents can only be added to a draft application.")
+    if row.application_id and row.application_id != app.application_id:
+        raise HTTPException(409, "This document is already linked to another application.")
+    row.application_id = app.application_id
+    audit.record(db, action="document.linked", customer_id=customer.customer_id,
+                 application_id=app.application_id, file_id=file_id)
+    db.commit()
+    from app.services import prefill
+    if row.status == "completed":
+        prefill.apply_file(db, file=row)
+    return {"file_id": str(file_id), "application_id": str(app.application_id)}
+
+
+@router.delete("/{file_id}/permanent", status_code=204)
+def delete_permanently(file_id: UUID, db: Session = Depends(get_db),
+                       customer: Customer = Depends(current_customer)) -> Response:
+    row = _owned_file(db, file_id, customer)
+    _editable_link(db, row)
+    if row.status in ("queued", "processing"):
+        raise HTTPException(409, "Wait for document processing to finish before deleting.")
+    _clear_proposals(db, row)
+    # Retained customer-confirmed values no longer refer to deleted evidence.
+    for field in db.scalars(select(ApplicationField).where(ApplicationField.file_id == file_id)):
+        field.file_id = None
+        field.evidence_quote = None
+        field.page = None
+        field.method = None
+    md = db.get(DocumentMarkdown, file_id)
+    if md:
+        directory = Path(settings.markdown_dir).resolve()
+        path = Path(md.markdown_path).resolve()
+        if path.parent != directory or path.name != f"{file_id}.md":
+            raise HTTPException(500, "Document storage path is invalid.")
+        path.unlink(missing_ok=True)
+    storage.delete_object(row.storage_key)
+    audit.record(db, action="document.deleted", customer_id=customer.customer_id,
+                 application_id=row.application_id, file_id=file_id)
+    db.delete(row)  # PostgreSQL cascades classification, extraction, markdown and vectors.
+    db.commit()
+    return Response(status_code=204)
 
 
 def _owned_file(db: Session, file_id: UUID, customer: Customer) -> File:
@@ -224,7 +301,12 @@ def _classification(cls: FileClassification | None) -> dict | None:
 def _summary(db: Session, row: File) -> dict:
     cls = db.get(FileClassification, row.file_id)
     md = db.get(DocumentMarkdown, row.file_id)
+    found = [{"field_name": e.field_name, "value": e.corrected_value or e.value_normalized or e.value_raw}
+             for e in db.scalars(select(Extraction).where(Extraction.file_id == row.file_id))]
+    missing = _missing_fields(row.document_tag, found)
     return {
+        "extracted_field_count": sum(bool(e["value"]) for e in found),
+        "missing_field_count": len(missing),
         "file_id": str(row.file_id), "document_tag": row.document_tag,
         "display_name": doc_types.display_name(row.document_tag),
         "original_name": row.original_name, "content_type": row.content_type,
@@ -232,6 +314,7 @@ def _summary(db: Session, row: File) -> dict:
         "logical_path": row.logical_path, "status": row.status,
         "error": row.error_detail,
         "application_id": str(row.application_id) if row.application_id else None,
+        "application_status": (db.get(Application, row.application_id).status if row.application_id and db.get(Application, row.application_id) else None),
         "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
         "classification": _classification(cls),
         "has_markdown": md is not None,

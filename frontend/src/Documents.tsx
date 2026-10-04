@@ -11,6 +11,7 @@ interface Props {
   applicationId: string;
   checklist: ChecklistItem[];
   documents: DocumentSummary[];
+  vaultDocuments: DocumentSummary[];
   onUploaded: () => void;
   onOpenDoc: (fileId: string) => void;
 }
@@ -22,6 +23,7 @@ export function DocumentsStep(props: Props) {
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [busy, setBusy] = useState(false);
+  const [showVault, setShowVault] = useState(false);
   const uploader = useRef<HTMLDialogElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
@@ -58,7 +60,7 @@ export function DocumentsStep(props: Props) {
 
   }
 
-  const ready = staged.filter(s => s.status === "local" || s.status === "error" || (s.status === "done" && (s.result?.outcome === "matched" || s.kept)));
+  const ready = staged.filter(s => s.status === "local" || s.status === "error" || s.result?.outcome === "failed" || (s.status === "done" && (s.result?.outcome === "matched" || s.kept)));
 
   async function upload() {
     if (!ready.length || busy) return;
@@ -67,7 +69,7 @@ export function DocumentsStep(props: Props) {
     for (const item of ready) {
       try {
         let result = item.result;
-        if (!result) {
+        if (!result || result.outcome === "failed") {
           setStaged(xs => xs.map(x => x.id === item.id ? {...x,status:"checking"} : x));
           result = await api.classify(item.file,item.cat);
           setStaged(xs => xs.map(x => x.id === item.id ? {...x,status:"done",result} : x));
@@ -84,7 +86,7 @@ export function DocumentsStep(props: Props) {
       }
     }
     setBusy(false);
-    if(done){toast(`${done} file${done>1?"s":""} saved and queued`,"ok");onUploaded();}
+    if(done){toast(`${done} file${done>1?"s":""} saved and queued`,"ok");onUploaded();if(done === staged.length) setActiveCat(null);}
   }
 
   function discard() {
@@ -143,7 +145,7 @@ export function DocumentsStep(props: Props) {
                   <small className="document-guidance">{c.guidance}</small><span>{s.have ? (s.need ? `${s.have} of ${s.need} uploaded` : `${s.have} uploaded`) : (s.need ? `0 of ${s.need} uploaded` : "No files uploaded")}</span>
                 </span>
                 {s.flagged ? <span className="chip w"><Icon name="alert" />Needs a look</span>
-                  : s.satisfied ? <span className="chip g"><Icon name="check" />Checked</span>
+                  : s.satisfied ? <span className="chip g"><Icon name="check" />Uploaded</span>
                   : s.have ? <span className="chip a">{s.have} of {s.need}</span>
                   : <span className="chip n">{s.need ? "Required" : "Optional"}</span>}
                 <span className="go"><Icon name="chevron" /></span>
@@ -218,6 +220,16 @@ export function DocumentsStep(props: Props) {
         </dialog>
       )}
 
+      <section className="card">
+        <h2>Use a document from My Vault</h2>
+        <p className="hint">Reuse an existing document without uploading another copy.</p>
+        <button className="btn sec" onClick={() => setShowVault(!showVault)}>{showVault ? "Hide vault documents" : "Choose from My Vault"}</button>
+        {showVault && <div className="vaultgrid" style={{marginTop:16}}>
+          {props.vaultDocuments.filter(d => !d.application_id).map(d => <DocCard key={d.file_id} doc={d} onOpen={onOpenDoc} mode="vault" applicationId={applicationId} onChanged={onUploaded} />)}
+          {!props.vaultDocuments.some(d => !d.application_id) && <p className="hint">No unattached documents yet. Documents removed from this application will appear here.</p>}
+        </div>}
+      </section>
+
       {documents.length > 0 && (
         <section className="card">
           <h2>Uploaded</h2>
@@ -225,7 +237,7 @@ export function DocumentsStep(props: Props) {
             Open any document to see what we read from it and correct anything we got wrong.
           </p>
           <div className="vaultgrid">
-            {documents.map((d) => <DocCard key={d.file_id} doc={d} onOpen={onOpenDoc} />)}
+            {documents.map((d) => <DocCard key={d.file_id} doc={d} onOpen={onOpenDoc} mode="application" applicationId={applicationId} onChanged={onUploaded} />)}
           </div>
         </section>
       )}
@@ -293,28 +305,63 @@ function StagedRow({ item, onKeep, onRemove, checklist, onCategory }: {
   );
 }
 
-export function DocCard({ doc, onOpen }: { doc: DocumentSummary; onOpen: (id: string) => void }) {
+export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
+  doc: DocumentSummary; onOpen: (id: string) => void;
+  mode?: "application" | "vault"; applicationId?: string; onChanged?: () => void;
+}) {
+  const [working, setWorking] = useState(false);
+  const toast = useToast();
+  const locked = Boolean(doc.application_status && doc.application_status !== "draft");
+  async function act(action: "remove" | "delete" | "link") {
+    const message = action === "remove"
+      ? `Remove "${doc.original_name}" from this application? It stays in My Vault. Unconfirmed pre-filled values from this file will be removed.`
+      : `Permanently delete "${doc.original_name}" from My Vault? ${doc.application_id ? "It will also be removed from its draft application. " : ""}The file, extracted data and document index will be deleted. This cannot be undone.`;
+    if (action !== "link" && !window.confirm(message)) return;
+    setWorking(true);
+    try {
+      if(action === "remove") await api.unlink(doc.file_id);
+      else if(action === "delete") await api.deleteDocument(doc.file_id);
+      else if(applicationId) await api.linkDocument(doc.file_id, applicationId);
+      toast(action === "remove" ? "Removed from application. Your vault copy is kept." : action === "delete" ? "Document permanently deleted." : "Document added to application.", "ok");
+      onChanged?.();
+    } catch(e) { toast(e instanceof ApiError ? e.message : "Could not update this document."); }
+    finally { setWorking(false); }
+  }
   const outcome = doc.classification?.outcome;
   const chip =
     doc.status === "processing" || doc.status === "queued"
       ? <span className="chip n">Reading it now</span>
       : doc.status === "failed"
       ? <span className="chip r"><Icon name="alert" />Could not read</span>
+      : doc.status === "completed" && doc.missing_field_count > 0
+      ? <span className="chip w"><Icon name="alert" />Fields need review</span>
       : outcome === "matched"
-      ? <span className="chip g"><Icon name="check" />Checked</span>
+      ? <span className="chip g"><Icon name="check" />Type matched</span>
       : outcome
       ? <span className="chip w"><Icon name="alert" />Needs a look</span>
       : <span className="chip n">Stored</span>;
 
   return (
+    <div className="document-card">
     <button className="vcard" onClick={() => onOpen(doc.file_id)}>
       <span className="vt"><Icon name={CATEGORY_ICON[doc.document_tag] ?? "doc"} /></span>
       <span className="vb">
         <b>{doc.original_name}</b>
         <span>{doc.display_name} &middot; {bytes(doc.size_bytes)}</span>
         {doc.classification && <span>AI detected: {doc.classification.detected_type.replaceAll("_", " ")}</span>}
+        <span>{doc.extracted_field_count} fields read{doc.missing_field_count > 0 ? ` · ${doc.missing_field_count} missing` : ""}</span>
         <span style={{ display: "block", marginTop: 8 }}>{chip}</span>
       </span>
     </button>
+    {mode && <div className="document-actions">
+      <button className="btn sec" onClick={() => onOpen(doc.file_id)}>Preview</button>
+      {mode === "application" ? <button className="btn sec" disabled={working || locked} onClick={() => void act("remove")}>Remove from application</button>
+        : <>
+          {applicationId && !doc.application_id && <button className="btn sec" disabled={working} onClick={() => void act("link")}>Use in application</button>}
+          <button className="btn sec danger" disabled={working || locked || ["queued","processing"].includes(doc.status)} onClick={() => void act("delete")}>Delete permanently</button>
+        </>}
+      {locked && <small className="hint">Linked to a submitted application</small>}
+    </div>}
+    </div>
   );
 }

@@ -399,3 +399,12 @@ select.ctl{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
   .btn{flex:1}
   .vaultgrid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
 }
+
+.missingbox b{display:flex;align-items:center;gap:8px}
+.missingbox b svg{width:20px;height:20px;flex:0 0 20px}
+
+.document-card{min-width:0;border:1px solid var(--line);border-radius:16px;background:white;overflow:hidden}
+.document-card .vcard{width:100%;border:0;border-radius:0}
+.document-actions{display:flex;gap:8px;padding:12px;flex-wrap:wrap;border-top:1px solid var(--line)}
+.document-actions .btn{font-size:12px;padding:9px 12px;min-height:38px}
+.document-actions .danger{color:#b42318;border-color:#f4b4ae}

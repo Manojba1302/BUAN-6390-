@@ -71,7 +71,8 @@ def handle(job: dict) -> None:
     with db.session() as conn:
         db.clear_extractions(conn, file_id)
         for name, payload in fields.items():
-            db.save_extraction(conn, file_id, name, payload, config.extractor_model)
+            db.save_extraction(conn, file_id, name, payload,
+                               config.vision_model if payload["method"] == "vision" else config.extractor_model)
         db.save_markdown(conn, file_id, str(md_path), len(markdown))
         db.replace_chunks(conn, file_id, str(record["customer_id"]), chunks)
         db.set_status(conn, file_id, "completed", pages=len(document["pages"]))

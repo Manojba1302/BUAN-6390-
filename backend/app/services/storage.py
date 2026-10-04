@@ -52,3 +52,7 @@ def get_object(key: str) -> bytes:
 
 def checksum(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
+
+
+def delete_object(key: str) -> None:
+    _client().delete_object(Bucket=settings.s3_bucket, Key=key)

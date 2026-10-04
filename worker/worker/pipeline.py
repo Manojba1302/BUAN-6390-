@@ -120,7 +120,7 @@ def extract(document: dict, document_tag: str) -> dict[str, dict]:
 
     for index, page in enumerate(document["pages"][:6], start=1):
         text = (page.get("text") or "").strip()
-        images = [page["image"]] if (page.get("image") and not text) else None
+        images = [page["image"]] if page.get("image") else None
         if not text and not images:
             continue
 
@@ -131,7 +131,7 @@ def extract(document: dict, document_tag: str) -> dict[str, dict]:
                                           images=images, timeout=180.0)
         except ollama.OllamaError as exc:
             log.warning("extraction failed on page %s: %s", index, exc)
-            continue
+            raise
 
         for name, payload in (answer.get("fields") or {}).items():
             if name not in spec["extract"] or name in out:
@@ -142,9 +142,9 @@ def extract(document: dict, document_tag: str) -> dict[str, dict]:
             out[name] = {
                 "value": value,
                 "normalized": _normalise(name, value),
-                "page": int(payload.get("page") or index),
-                "quote": str(payload.get("quote") or "")[:500],
-                "method": page.get("method", "native_text"),
+                "page": index,
+                "quote": str(payload.get("quote") or "")[:500] if isinstance(payload, dict) else "",
+                "method": "vision" if images else page.get("method", "native_text"),
             }
     return out
 

@@ -16,7 +16,7 @@ if (!$SkipModels) {
         Start-Sleep -Seconds 1
     }
     if(!$taskReady){throw 'Ollama did not start. Check its container logs.'}
-    $taskModels=@('llama3.2-vision:11b','llama3.1:8b','nomic-embed-text')
+    $taskModels=@('gemma3:4b','llama3.1:8b','nomic-embed-text')
     foreach($taskModel in $taskModels){Invoke-Docker compose -f docker-compose.yml -f compose.auth.yml exec -T ollama ollama pull $taskModel}
 }
 Invoke-Docker compose -f docker-compose.yml -f compose.auth.yml --profile models up --build -d

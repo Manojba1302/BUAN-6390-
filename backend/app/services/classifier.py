@@ -44,7 +44,10 @@ def classify(*, body: bytes, content_type: str | None, name: str, selected_type:
         # The model being down must not block an upload. Fall back to the
         # regex vote, and say unknown rather than guessing.
         detected = regex_type or doc_types.UNKNOWN
-        return _result(selected_type, detected, True, [], started)
+        result = _result(selected_type, detected, True, [], started, failed=not regex_type)
+        if not regex_type:
+            result["message"] = "Document checking is unavailable. Check that the vision model is installed and running, then retry Submit."
+        return result
 
     detected = str(answer.get("document_type", doc_types.UNKNOWN)).strip().lower()
     if detected not in doc_types.type_ids():

@@ -114,6 +114,8 @@ export interface ClassifyResult {
 }
 
 export interface DocumentSummary {
+  extracted_field_count: number;
+  missing_field_count: number;
   file_id: string;
   document_tag: string;
   display_name: string;
@@ -124,6 +126,7 @@ export interface DocumentSummary {
   status: "uploaded" | "queued" | "processing" | "completed" | "failed";
   error: string | null;
   application_id: string | null;
+  application_status: string | null;
   uploaded_at: string | null;
   classification: {
     selected_type: string; detected_type: string; outcome: Outcome;

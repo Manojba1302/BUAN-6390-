@@ -15,7 +15,7 @@ if [ "${1:-}" != '--skip-models' ]; then
     sleep 1
   done
   [ "$ready" = true ] || { echo 'Ollama did not start. Check its logs.'; exit 1; }
-  for model in llama3.2-vision:11b llama3.1:8b nomic-embed-text; do
+  for model in gemma3:4b llama3.1:8b nomic-embed-text; do
     "${compose[@]}" exec -T ollama ollama pull "$model"
   done
 else

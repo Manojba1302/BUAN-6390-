@@ -125,6 +125,7 @@ def _replace_repeatable(db: Session, app: Application, model, rows: list[dict]) 
     for row in rows:
         clean = {k: v for k, v in row.items() if k in columns and k != "application_id"}
         clean.pop(f"{model.__tablename__}_id", None)
+        clean.pop("source_file_id", None)  # Saving confirms the customer owns these values.
         db.add(model(application_id=app.application_id, **clean))
 
 

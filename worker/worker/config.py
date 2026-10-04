@@ -17,9 +17,9 @@ class Config:
     s3_secret_key = os.getenv("S3_SECRET_KEY", "homeflow123")
     s3_region = os.getenv("S3_REGION", "us-east-1")
 
-    classifier_model = os.getenv("CLASSIFIER_MODEL", "llama3.2-vision:11b")
+    classifier_model = os.getenv("CLASSIFIER_MODEL", "gemma3:4b")
     extractor_model = os.getenv("EXTRACTOR_MODEL", "llama3.1:8b")
-    vision_model = os.getenv("VISION_MODEL", "llama3.2-vision:11b")
+    vision_model = os.getenv("VISION_MODEL", "gemma3:4b")
     embed_model = os.getenv("EMBED_MODEL", "nomic-embed-text")
 
     markdown_dir = Path(os.getenv("MARKDOWN_DIR", "/srv/markdown"))

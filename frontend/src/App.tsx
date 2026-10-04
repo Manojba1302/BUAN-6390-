@@ -298,9 +298,9 @@ export function App() {
         <main className="main" ref={main} tabIndex={-1}>
           <p className="application-title">{vaultOpen ? "HomeFlow · Document library" : "My Loan Application"}</p>
           {vaultOpen ? (
-            <Vault documents={vaultDocuments} onOpen={setOpenDoc} />
+            <Vault documents={vaultDocuments} onOpen={setOpenDoc} applicationId={appId} onChanged={() => void load(appId)} />
           ) : stepSpec.id === "documents" ? (
-            <DocumentsStep applicationId={appId} checklist={checklist.map(c => ["Self-employed", "Retired", "Not currently employed", "Other"].includes(values.employmentStatus) && ["w2", "paystub"].includes(c.document_tag) ? { ...c, required_count: 0, guidance: "Optional for your current employment situation. You can still upload this document if it applies to you." } : c)} documents={documents}
+            <DocumentsStep applicationId={appId} checklist={checklist.map(c => ["Self-employed", "Retired", "Not currently employed", "Other"].includes(values.employmentStatus) && ["w2", "paystub"].includes(c.document_tag) ? { ...c, required_count: 0, guidance: "Optional for your current employment situation. You can still upload this document if it applies to you." } : c)} documents={documents} vaultDocuments={vaultDocuments}
                            onUploaded={() => void load(appId)} onOpenDoc={setOpenDoc} />
           ) : (
             <FormStep dictionary={dictionary} step={stepSpec} values={values} errors={errors}
@@ -324,8 +324,8 @@ export function App() {
   );
 }
 
-function Vault({ documents, onOpen }: {
-  documents: DocumentSummary[]; onOpen: (id: string) => void;
+function Vault({ documents, onOpen, applicationId, onChanged }: {
+  documents: DocumentSummary[]; onOpen: (id: string) => void; applicationId: string; onChanged: () => void;
 }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -356,7 +356,7 @@ function Vault({ documents, onOpen }: {
       </div>
       {shown.length ? (
         <div className="vaultgrid">
-          {[{label:"Identity",tags:["drivers_license","ssn_card"]},{label:"Income",tags:["w2","paystub"]},{label:"Banking",tags:["bank_statement"]},{label:"Other documents",tags:tags.filter(t => !["drivers_license","ssn_card","w2","paystub","bank_statement"].includes(t))}].map(group => { const items = shown.filter(d => group.tags.includes(d.document_tag)); return items.length ? <section className="vault-group" key={group.label}><h2>{group.label}<span>{items.length}</span></h2><div className="vault-group-grid">{items.map(d => <DocCard key={d.file_id} doc={d} onOpen={onOpen} />)}</div></section> : null; })}
+          {[{label:"Identity",tags:["drivers_license","ssn_card"]},{label:"Income",tags:["w2","paystub"]},{label:"Banking",tags:["bank_statement"]},{label:"Other documents",tags:tags.filter(t => !["drivers_license","ssn_card","w2","paystub","bank_statement"].includes(t))}].map(group => { const items = shown.filter(d => group.tags.includes(d.document_tag)); return items.length ? <section className="vault-group" key={group.label}><h2>{group.label}<span>{items.length}</span></h2><div className="vault-group-grid">{items.map(d => <DocCard key={d.file_id} doc={d} onOpen={onOpen} mode="vault" applicationId={applicationId} onChanged={onChanged} />)}</div></section> : null; })}
         </div>
       ) : (
         <section className="card">

@@ -115,6 +115,12 @@ export const api = {
   correct: (fileId: string, corrections: { extraction_id: string; value: string }[]) =>
     request<{ corrected: number }>(`/documents/${fileId}/extractions`, json({ corrections })),
 
+  linkDocument: (fileId: string, applicationId: string) =>
+    request(`/documents/${fileId}/link`, { ...json({ application_id: applicationId }), method: "POST" }),
+
+  deleteDocument: (fileId: string) =>
+    request<void>(`/documents/${fileId}/permanent`, { method: "DELETE", headers: headers() }),
+
   unlink: (fileId: string) =>
     request<void>(`/documents/${fileId}`, { method: "DELETE", headers: headers() }),
 

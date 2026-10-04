@@ -20,10 +20,11 @@ class Settings(BaseSettings):
     s3_access_key: str = "homeflow"
     s3_secret_key: str = "homeflow123"
     s3_region: str = "us-east-1"
+    markdown_dir: str = "/srv/markdown"
 
     ollama_base_url: str = "http://host.docker.internal:11434"
-    classifier_model: str = "llama3.2-vision:11b"
-    classifier_timeout_seconds: float = 25.0
+    classifier_model: str = "gemma3:4b"
+    classifier_timeout_seconds: float = 120.0
 
     max_upload_mb: int = 20
     allowed_content_types: str = "application/pdf,image/jpeg,image/png,image/heic,image/webp,image/tiff"

@@ -138,6 +138,9 @@ def _apply_employment(db: Session, file: File, values: dict[str, Extraction]) ->
                          source_file_id=file.file_id)
         db.add(row)
 
+    if row.source_file_id is None:
+        return  # Preserve customer-confirmed employment.
+
     if "position" in values and not row.position:
         row.position = _value(values["position"])
 
@@ -174,6 +177,9 @@ def _apply_asset(db: Session, file: File, values: dict[str, Extraction]) -> None
                      institution=institution, account_mask=mask, balance=balance or 0,
                      as_of=period_end or None, source_file_id=file.file_id))
         return
+
+    if row.source_file_id is None:
+        return  # Preserve customer-confirmed assets.
 
     # Same account, another month. Keep the most recent balance, never add them.
     if balance is not None and (row.as_of is None or (period_end or "") >= str(row.as_of)):

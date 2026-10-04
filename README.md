@@ -62,7 +62,7 @@ bash scripts/setup.sh --skip-models
 
 AI classification/extraction/chat will be unavailable until the models are pulled. This mode uses the real API, not mock data.
 
-The scripts download `llama3.2-vision:11b`, `llama3.1:8b`, and `nomic-embed-text`. If you change model settings, pull those additional model names yourself. Do not change the embedding model without handling its vector dimensions and reindexing stored data.
+The scripts download `gemma3:4b`, `llama3.1:8b`, and `nomic-embed-text`. If you change model settings, pull those additional model names yourself. Do not change the embedding model without handling its vector dimensions and reindexing stored data.
 
 ## 4. Open and test
 
@@ -295,3 +295,48 @@ Checklist file counts are collection indicators. They do not yet verify distinct
 Fresh installations use the homeflow Compose project, HomeFlow service names and named persistent volumes for the database, storage, markdown and queue. RabbitMQ uses a stable hostname so queue data survives container recreation.
 
 For an existing installation, stop its old stack without deleting volumes before changing the project name. Set COMPOSE_PROJECT_NAME=homeflow in your private .env. To reuse existing volumes, set REUSE_DATA_VOLUMES=true and specify DB_VOLUME_NAME, STORAGE_VOLUME_NAME, MARKDOWN_VOLUME_NAME and QUEUE_VOLUME_NAME using the actual existing volume names. Preserve RABBITMQ_HOSTNAME when reusing an existing RabbitMQ data volume. All four external volumes must already exist. Fresh clones should leave these overrides unset. Never commit your private .env.
+
+
+### Vault ownership and application documents
+
+Uploaded files belong to the customer vault. An application uses an existing vault file through its application link.
+
+- **Remove from application** unlinks the file and updates the checklist. The original, extraction, markdown and vectors remain in My Vault. Unconfirmed values derived from that file are cleared; customer-confirmed values are preserved.
+- **Choose from My Vault / Use in application** attaches an unattached file without uploading a duplicate. Completed extraction is applied to the draft application.
+- **Delete permanently** is an explicit, confirmed vault action. It deletes the stored original, generated markdown, classification, extraction and vectors. Retained customer-confirmed application values lose their deleted evidence reference.
+- Submitted application documents cannot be removed or deleted. Wait for queued/processing files to finish before permanent deletion.
+- The current schema links a file to one application at a time. Simultaneous reuse across applications requires a future junction table.
+
+Run the lifecycle integration check against the local stack (it creates and cleans its own synthetic records; it does not use customer documents):
+
+```powershell
+docker exec -e PYTHONPATH=/srv/app:/srv/shared -e HOMEFLOW_INTEGRATION_TEST=1 homeflow-backend-1 python tests/document_lifecycle_test.py
+```
+
+
+### Updating an existing checkout
+
+Commit or stash your own changes before updating:
+
+```powershell
+git pull origin main
+```
+
+Existing `.env` files are private and are not overwritten by Git. Set `CLASSIFIER_MODEL=gemma3:4b` and `VISION_MODEL=gemma3:4b` in your `.env`. Keep `EXTRACTOR_MODEL=llama3.1:8b` and `EMBED_MODEL=nomic-embed-text`.
+
+For Docker-managed Ollama, run the setup script again to download the required models and rebuild services:
+
+```powershell
+.\scripts\setup.ps1
+```
+
+For a host-installed Ollama (with your existing `OLLAMA_BASE_URL` pointing to it):
+
+```powershell
+ollama pull gemma3:4b
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
+docker compose -f docker-compose.yml -f compose.auth.yml up --build -d
+```
+
+Refresh the browser after the services finish starting. These updates preserve existing Docker data volumes; do not use `down -v` to update. Local accounts and documents are not distributed through Git.
