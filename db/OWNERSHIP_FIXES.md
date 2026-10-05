@@ -65,3 +65,32 @@ All six checks passed on Annu's local HomeFlow PostgreSQL database:
 
 These tests check database relationships. They do not verify API access
 control, AI accuracy, or deletion of physical documents from MinIO.
+
+## File metadata checks — migration 005
+
+File: `db/init/005_file_metadata_checks.sql`
+
+Prevents negative values in size_bytes, page_count, and attempts.
+Zero remains allowed. size_bytes and page_count may still be NULL;
+attempts remains required.
+
+For an existing database, run the complete migration once if these
+constraints are not already installed:
+- file_size_bytes_nonnegative
+- file_page_count_nonnegative
+- file_attempts_nonnegative
+
+Downloading the code or restarting Docker does not apply this change
+to an existing database. Annu's local database already has this fix.
+
+Test: `db/tests/test_file_metadata_checks.sql`
+
+All six local checks passed on October 5, 2026:
+- Unknown size and page count accepted.
+- Zero values accepted.
+- Positive values accepted.
+- Negative size_bytes blocked.
+- Negative page_count blocked.
+- Negative attempts blocked.
+
+The test ends with ROLLBACK to remove temporary records.
