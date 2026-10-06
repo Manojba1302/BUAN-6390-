@@ -119,3 +119,7 @@ remains to be verified.
 These tests verify database rules and relationships. They do not verify
 API access controls, AI extraction accuracy, document-period coverage
 or deletion of physical files from MinIO.
+
+Fresh database initialization was verified on October 6, 2026.
+All six scripts (`001`, `003`, `004`, `005`, `006` and `007`)
+ran successfully in order on an empty database, with no initialization errors.
