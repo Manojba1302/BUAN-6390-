@@ -1,5 +1,22 @@
-Next, save the fix for GitHub:
-1. Open the Query Tool’s Save As option.
-2. Save only the migration block—from BEGIN through COMMIT, not the earlier queries or tests.
-3. Use the filename 003_file_application_ownership.sql in your project’s db/init folder.
-This lets a fresh Docker database receive the same fix automatically. Existing databases will need to run this migration once, as you just did.
+-- Apply the ownership fix as one transaction.
+BEGIN;
+
+-- Allow a file to reference an application and its customer together.
+ALTER TABLE public.application
+    ADD CONSTRAINT application_id_customer_id_unique
+    UNIQUE (application_id, customer_id);
+
+-- Remove the old relationship that checked only the application ID.
+ALTER TABLE public.file
+    DROP CONSTRAINT file_application_id_fkey;
+
+-- Require the file and application to belong to the same customer.
+-- When an application is deleted, keep the file in the customer vault.
+ALTER TABLE public.file
+    ADD CONSTRAINT file_application_customer_fkey
+    FOREIGN KEY (application_id, customer_id)
+    REFERENCES public.application (application_id, customer_id)
+    ON DELETE SET NULL (application_id);
+
+-- Save the changes.
+COMMIT;
