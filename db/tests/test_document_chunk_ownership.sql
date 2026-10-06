@@ -68,7 +68,7 @@ BEGIN
         WHERE chunk_id = test_chunk_id
     ) THEN
         RAISE NOTICE 'PASS 3: deleting the file removed its chunk.';
-    ELSEare
+    ELSE
         RAISE EXCEPTION 'FAIL: chunk remained after file deletion.';
     END IF;
 END $$;
