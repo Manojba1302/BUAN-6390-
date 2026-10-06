@@ -1,4 +1,4 @@
--- Keep all test records inside a transaction.
+﻿-- Keep all test records inside a transaction.
 BEGIN;
 
 DO $$
@@ -70,7 +70,7 @@ BEGIN
         WHEN foreign_key_violation THEN
             GET STACKED DIAGNOSTICS
                 failed_constraint = CONSTRAINT_NAME;
-            IF failed_constraint <> 'application_field_source_file_fkey' THEN
+            IF failed_constraint <> 'application_field_source_file_customer_fkey' THEN
                 RAISE;
             END IF;
             RAISE NOTICE 'PASS 2: application field rejected a nonexistent file.';
@@ -87,7 +87,7 @@ BEGIN
         WHEN foreign_key_violation THEN
             GET STACKED DIAGNOSTICS
                 failed_constraint = CONSTRAINT_NAME;
-            IF failed_constraint <> 'employment_source_file_fkey' THEN
+            IF failed_constraint <> 'employment_source_file_customer_fkey' THEN
                 RAISE;
             END IF;
             RAISE NOTICE 'PASS 3: employment rejected a nonexistent file.';
@@ -104,7 +104,7 @@ BEGIN
         WHEN foreign_key_violation THEN
             GET STACKED DIAGNOSTICS
                 failed_constraint = CONSTRAINT_NAME;
-            IF failed_constraint <> 'asset_source_file_fkey' THEN
+            IF failed_constraint <> 'asset_source_file_customer_fkey' THEN
                 RAISE;
             END IF;
             RAISE NOTICE 'PASS 4: asset rejected a nonexistent file.';
