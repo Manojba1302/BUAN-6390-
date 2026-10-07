@@ -9,5 +9,11 @@ case "${1:-start}" in
   logs) "${compose[@]}" logs -f backend worker ;;
   test) "${compose[@]}" run --rm --no-deps backend python -m unittest tests.auth_test tests.classifier_test tests.logic_test tests.code_standards_test ;;
   test-db) "${compose[@]}" run --rm -e HOMEFLOW_DB_TEST=1 backend python -m unittest tests.postgres_test ;;
-  *) echo 'Usage: bash scripts/homeflow.sh start|stop|status|logs|test|test-db'; exit 1 ;;
+  test-worker) "${compose[@]}" run --rm --no-deps worker python -m unittest discover -s tests ;;
+  models) "${compose[@]}" up -d ollama
+    for model in gemma3:4b llama3.1:8b nomic-embed-text "${@:2}"; do "${compose[@]}" exec -T ollama ollama pull "$model"; done ;;
+  eval) "${compose[@]}" up -d ollama
+    "${compose[@]}" run --rm --no-deps worker python -m evaluation.run "${@:2}" ;;
+  eval-compare) "${compose[@]}" run --rm --no-deps worker python -m evaluation.compare "${@:2}" ;;
+  *) echo 'Usage: bash scripts/homeflow.sh start|stop|status|logs|test|test-db|test-worker|models|eval|eval-compare'; exit 1 ;;
 esac

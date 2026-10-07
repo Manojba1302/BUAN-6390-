@@ -1,0 +1,479 @@
+[
+  {
+    "file": "p1_paystub.pdf",
+    "type": "paystub",
+    "person": "p1",
+    "variant": "digital",
+    "fields": {
+      "employee_name": "Jordan A. Sample",
+      "employer_name": "Northwind Example Logistics LLC",
+      "pay_period_start": "2026-09-01",
+      "pay_period_end": "2026-09-15",
+      "pay_date": "2026-09-19",
+      "pay_frequency": "semimonthly",
+      "gross_pay": "3250.00",
+      "net_pay": "2481.36",
+      "ytd_gross": "55250.00"
+    }
+  },
+  {
+    "file": "p1_paystub_photo.jpg",
+    "type": "paystub",
+    "person": "p1",
+    "variant": "photo",
+    "fields": {
+      "employee_name": "Jordan A. Sample",
+      "employer_name": "Northwind Example Logistics LLC",
+      "pay_period_start": "2026-09-01",
+      "pay_period_end": "2026-09-15",
+      "pay_date": "2026-09-19",
+      "pay_frequency": "semimonthly",
+      "gross_pay": "3250.00",
+      "net_pay": "2481.36",
+      "ytd_gross": "55250.00"
+    }
+  },
+  {
+    "file": "p1_w2.pdf",
+    "type": "w2",
+    "person": "p1",
+    "variant": "digital",
+    "fields": {
+      "employee_name": "Jordan A. Sample",
+      "employee_ssn": "000-12-3456",
+      "employer_name": "Northwind Example Logistics LLC",
+      "employer_ein": "12-3456789",
+      "tax_year": "2025",
+      "box1_wages": "78000.00",
+      "box2_federal_tax": "9120.00"
+    }
+  },
+  {
+    "file": "p1_w2_photo.jpg",
+    "type": "w2",
+    "person": "p1",
+    "variant": "photo",
+    "fields": {
+      "employee_name": "Jordan A. Sample",
+      "employee_ssn": "000-12-3456",
+      "employer_name": "Northwind Example Logistics LLC",
+      "employer_ein": "12-3456789",
+      "tax_year": "2025",
+      "box1_wages": "78000.00",
+      "box2_federal_tax": "9120.00"
+    }
+  },
+  {
+    "file": "p1_bank_statement.pdf",
+    "type": "bank_statement",
+    "person": "p1",
+    "variant": "digital",
+    "fields": {
+      "account_holder": "Jordan A. Sample",
+      "institution": "Example Community Bank",
+      "account_mask": "****4821",
+      "period_start": "2026-08-01",
+      "period_end": "2026-08-31",
+      "beginning_balance": "5210.44",
+      "ending_balance": "6835.25",
+      "total_deposits": "6500.00",
+      "total_withdrawals": "4875.19"
+    }
+  },
+  {
+    "file": "p1_bank_statement_photo.jpg",
+    "type": "bank_statement",
+    "person": "p1",
+    "variant": "photo",
+    "fields": {
+      "account_holder": "Jordan A. Sample",
+      "institution": "Example Community Bank",
+      "account_mask": "****4821",
+      "period_start": "2026-08-01",
+      "period_end": "2026-08-31",
+      "beginning_balance": "5210.44",
+      "ending_balance": "6835.25",
+      "total_deposits": "6500.00",
+      "total_withdrawals": "4875.19"
+    }
+  },
+  {
+    "file": "p1_drivers_license.pdf",
+    "type": "drivers_license",
+    "person": "p1",
+    "variant": "digital",
+    "fields": {
+      "full_name": "Jordan A. Sample",
+      "date_of_birth": "1990-04-12",
+      "license_number": "40112233",
+      "address": "123 Maple Test Ave",
+      "city": "Dallas",
+      "state": "TX",
+      "zip": "75201",
+      "issue_date": "2023-06-14",
+      "expiry_date": "2031-04-12"
+    }
+  },
+  {
+    "file": "p1_drivers_license_photo.jpg",
+    "type": "drivers_license",
+    "person": "p1",
+    "variant": "photo",
+    "fields": {
+      "full_name": "Jordan A. Sample",
+      "date_of_birth": "1990-04-12",
+      "license_number": "40112233",
+      "address": "123 Maple Test Ave",
+      "city": "Dallas",
+      "state": "TX",
+      "zip": "75201",
+      "issue_date": "2023-06-14",
+      "expiry_date": "2031-04-12"
+    }
+  },
+  {
+    "file": "p1_ssn_card.pdf",
+    "type": "ssn_card",
+    "person": "p1",
+    "variant": "digital",
+    "fields": {
+      "full_name": "Jordan A. Sample",
+      "ssn": "000-12-3456"
+    }
+  },
+  {
+    "file": "p1_ssn_card_photo.jpg",
+    "type": "ssn_card",
+    "person": "p1",
+    "variant": "photo",
+    "fields": {
+      "full_name": "Jordan A. Sample",
+      "ssn": "000-12-3456"
+    }
+  },
+  {
+    "file": "p2_paystub.pdf",
+    "type": "paystub",
+    "person": "p2",
+    "variant": "digital",
+    "fields": {
+      "employee_name": "Priya Testwell",
+      "employer_name": "Bluebird Demo Software Inc",
+      "pay_period_start": "2026-09-01",
+      "pay_period_end": "2026-09-15",
+      "pay_date": "2026-09-19",
+      "pay_frequency": null,
+      "gross_pay": "4615.38",
+      "net_pay": "3390.12",
+      "ytd_gross": "83076.84"
+    }
+  },
+  {
+    "file": "p2_paystub_photo.jpg",
+    "type": "paystub",
+    "person": "p2",
+    "variant": "photo",
+    "fields": {
+      "employee_name": "Priya Testwell",
+      "employer_name": "Bluebird Demo Software Inc",
+      "pay_period_start": "2026-09-01",
+      "pay_period_end": "2026-09-15",
+      "pay_date": "2026-09-19",
+      "pay_frequency": null,
+      "gross_pay": "4615.38",
+      "net_pay": "3390.12",
+      "ytd_gross": "83076.84"
+    }
+  },
+  {
+    "file": "p2_w2.pdf",
+    "type": "w2",
+    "person": "p2",
+    "variant": "digital",
+    "fields": {
+      "employee_name": "Priya Testwell",
+      "employee_ssn": "000-98-7654",
+      "employer_name": "Bluebird Demo Software Inc",
+      "employer_ein": "98-7654321",
+      "tax_year": "2025",
+      "box1_wages": "118500.00",
+      "box2_federal_tax": "17775.00"
+    }
+  },
+  {
+    "file": "p2_w2_photo.jpg",
+    "type": "w2",
+    "person": "p2",
+    "variant": "photo",
+    "fields": {
+      "employee_name": "Priya Testwell",
+      "employee_ssn": "000-98-7654",
+      "employer_name": "Bluebird Demo Software Inc",
+      "employer_ein": "98-7654321",
+      "tax_year": "2025",
+      "box1_wages": "118500.00",
+      "box2_federal_tax": "17775.00"
+    }
+  },
+  {
+    "file": "p2_bank_statement.pdf",
+    "type": "bank_statement",
+    "person": "p2",
+    "variant": "digital",
+    "fields": {
+      "account_holder": "Priya Testwell",
+      "institution": "Sample Federal Credit Union",
+      "account_mask": "****1907",
+      "period_start": "2026-08-01",
+      "period_end": "2026-08-31",
+      "beginning_balance": "12040.10",
+      "ending_balance": "13558.38",
+      "total_deposits": "9230.76",
+      "total_withdrawals": "7712.48"
+    }
+  },
+  {
+    "file": "p2_bank_statement_photo.jpg",
+    "type": "bank_statement",
+    "person": "p2",
+    "variant": "photo",
+    "fields": {
+      "account_holder": "Priya Testwell",
+      "institution": "Sample Federal Credit Union",
+      "account_mask": "****1907",
+      "period_start": "2026-08-01",
+      "period_end": "2026-08-31",
+      "beginning_balance": "12040.10",
+      "ending_balance": "13558.38",
+      "total_deposits": "9230.76",
+      "total_withdrawals": "7712.48"
+    }
+  },
+  {
+    "file": "p2_drivers_license.pdf",
+    "type": "drivers_license",
+    "person": "p2",
+    "variant": "digital",
+    "fields": {
+      "full_name": "Priya Testwell",
+      "date_of_birth": "1987-11-03",
+      "license_number": "27788990",
+      "address": "45 Elm Placeholder St",
+      "city": "Austin",
+      "state": "TX",
+      "zip": "78701",
+      "issue_date": "2023-06-14",
+      "expiry_date": "2031-04-12"
+    }
+  },
+  {
+    "file": "p2_drivers_license_photo.jpg",
+    "type": "drivers_license",
+    "person": "p2",
+    "variant": "photo",
+    "fields": {
+      "full_name": "Priya Testwell",
+      "date_of_birth": "1987-11-03",
+      "license_number": "27788990",
+      "address": "45 Elm Placeholder St",
+      "city": "Austin",
+      "state": "TX",
+      "zip": "78701",
+      "issue_date": "2023-06-14",
+      "expiry_date": "2031-04-12"
+    }
+  },
+  {
+    "file": "p2_ssn_card.pdf",
+    "type": "ssn_card",
+    "person": "p2",
+    "variant": "digital",
+    "fields": {
+      "full_name": "Priya Testwell",
+      "ssn": "000-98-7654"
+    }
+  },
+  {
+    "file": "p2_ssn_card_photo.jpg",
+    "type": "ssn_card",
+    "person": "p2",
+    "variant": "photo",
+    "fields": {
+      "full_name": "Priya Testwell",
+      "ssn": "000-98-7654"
+    }
+  },
+  {
+    "file": "p3_paystub.pdf",
+    "type": "paystub",
+    "person": "p3",
+    "variant": "digital",
+    "fields": {
+      "employee_name": "Marcus Q. Fictional",
+      "employer_name": "Cedar Mock Health Partners",
+      "pay_period_start": "2026-09-01",
+      "pay_period_end": "2026-09-15",
+      "pay_date": "2026-09-19",
+      "pay_frequency": "biweekly",
+      "gross_pay": "1840.00",
+      "net_pay": "1502.77",
+      "ytd_gross": "34960.00"
+    }
+  },
+  {
+    "file": "p3_paystub_photo.jpg",
+    "type": "paystub",
+    "person": "p3",
+    "variant": "photo",
+    "fields": {
+      "employee_name": "Marcus Q. Fictional",
+      "employer_name": "Cedar Mock Health Partners",
+      "pay_period_start": "2026-09-01",
+      "pay_period_end": "2026-09-15",
+      "pay_date": "2026-09-19",
+      "pay_frequency": "biweekly",
+      "gross_pay": "1840.00",
+      "net_pay": "1502.77",
+      "ytd_gross": "34960.00"
+    }
+  },
+  {
+    "file": "p3_w2.pdf",
+    "type": "w2",
+    "person": "p3",
+    "variant": "digital",
+    "fields": {
+      "employee_name": "Marcus Q. Fictional",
+      "employee_ssn": "000-55-1212",
+      "employer_name": "Cedar Mock Health Partners",
+      "employer_ein": "45-1122334",
+      "tax_year": "2025",
+      "box1_wages": "46920.00",
+      "box2_federal_tax": "3980.00"
+    }
+  },
+  {
+    "file": "p3_w2_photo.jpg",
+    "type": "w2",
+    "person": "p3",
+    "variant": "photo",
+    "fields": {
+      "employee_name": "Marcus Q. Fictional",
+      "employee_ssn": "000-55-1212",
+      "employer_name": "Cedar Mock Health Partners",
+      "employer_ein": "45-1122334",
+      "tax_year": "2025",
+      "box1_wages": "46920.00",
+      "box2_federal_tax": "3980.00"
+    }
+  },
+  {
+    "file": "p3_bank_statement.pdf",
+    "type": "bank_statement",
+    "person": "p3",
+    "variant": "digital",
+    "fields": {
+      "account_holder": "Marcus Q. Fictional",
+      "institution": "Demo National Bank",
+      "account_mask": "****3366",
+      "period_start": "2026-08-01",
+      "period_end": "2026-08-31",
+      "beginning_balance": "840.15",
+      "ending_balance": "1418.53",
+      "total_deposits": "3680.00",
+      "total_withdrawals": "3101.62"
+    }
+  },
+  {
+    "file": "p3_bank_statement_photo.jpg",
+    "type": "bank_statement",
+    "person": "p3",
+    "variant": "photo",
+    "fields": {
+      "account_holder": "Marcus Q. Fictional",
+      "institution": "Demo National Bank",
+      "account_mask": "****3366",
+      "period_start": "2026-08-01",
+      "period_end": "2026-08-31",
+      "beginning_balance": "840.15",
+      "ending_balance": "1418.53",
+      "total_deposits": "3680.00",
+      "total_withdrawals": "3101.62"
+    }
+  },
+  {
+    "file": "p3_drivers_license.pdf",
+    "type": "drivers_license",
+    "person": "p3",
+    "variant": "digital",
+    "fields": {
+      "full_name": "Marcus Q. Fictional",
+      "date_of_birth": "1995-01-28",
+      "license_number": "13579246",
+      "address": "9 Birch Demo Rd",
+      "city": "Plano",
+      "state": "TX",
+      "zip": "75024",
+      "issue_date": "2023-06-14",
+      "expiry_date": "2031-04-12"
+    }
+  },
+  {
+    "file": "p3_drivers_license_photo.jpg",
+    "type": "drivers_license",
+    "person": "p3",
+    "variant": "photo",
+    "fields": {
+      "full_name": "Marcus Q. Fictional",
+      "date_of_birth": "1995-01-28",
+      "license_number": "13579246",
+      "address": "9 Birch Demo Rd",
+      "city": "Plano",
+      "state": "TX",
+      "zip": "75024",
+      "issue_date": "2023-06-14",
+      "expiry_date": "2031-04-12"
+    }
+  },
+  {
+    "file": "p3_ssn_card.pdf",
+    "type": "ssn_card",
+    "person": "p3",
+    "variant": "digital",
+    "fields": {
+      "full_name": "Marcus Q. Fictional",
+      "ssn": "000-55-1212"
+    }
+  },
+  {
+    "file": "p3_ssn_card_photo.jpg",
+    "type": "ssn_card",
+    "person": "p3",
+    "variant": "photo",
+    "fields": {
+      "full_name": "Marcus Q. Fictional",
+      "ssn": "000-55-1212"
+    }
+  },
+  {
+    "file": "p1_utility_bill.pdf",
+    "type": "unknown",
+    "person": "p1",
+    "variant": "digital",
+    "fields": {}
+  },
+  {
+    "file": "p2_lease_letter.pdf",
+    "type": "unknown",
+    "person": "p2",
+    "variant": "digital",
+    "fields": {}
+  },
+  {
+    "file": "p3_utility_bill_photo.jpg",
+    "type": "unknown",
+    "person": "p3",
+    "variant": "photo",
+    "fields": {}
+  }
+]

@@ -66,4 +66,8 @@ nothing fights us on the look.
 ## Authentication
 Password accounts use salted scrypt hashes and opaque, revocable HttpOnly cookie sessions. Reset links are single-use and expire after 30 minutes. Mailpit v1.27 receives local reset emails; HTTPS and real SMTP are required for deployment. Email-only development authentication has been removed.
 
-
+## Model evaluation
+`worker/evaluation/` scores the models on 33 fictional labelled documents (digital PDFs and phone
+photos of all five types, plus documents that should come back unknown). It reports stage 1 and
+stage 2 classification accuracy, field extraction accuracy (correct, wrong, missed, invented) and
+time per document, and compares runs of different models. Run `bash scripts/homeflow.sh eval`.

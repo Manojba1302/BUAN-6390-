@@ -141,6 +141,7 @@ Stopping preserves named volumes containing accounts, documents, models, and mar
 - `frontend/`: React/TypeScript UI, login and account screens.
 - `backend/`: FastAPI endpoints, authentication, database models and tests.
 - `worker/`: queued document processing.
+- `worker/evaluation/`: model evaluation with fictional labelled documents (see its README).
 - `shared/`: document definitions and processing helpers used by API/worker.
 - `db/init/`: initial PostgreSQL/pgvector schema and seed data.
 - `infra/minio/`: portable storage image build.
@@ -265,6 +266,16 @@ After first startup, use `scripts/homeflow.ps1 test` (Windows) or `bash scripts/
 - Confirm models are installed with `docker compose --profile models exec ollama ollama list` and inspect worker logs during processing.
 
 The authentication suite covers ownership, session expiry/logout, reset replay, rate limits and password rules in an isolated database. It does not prove document accuracy or live SMTP/database integration. Keep model evaluation results separate from build/test success.
+
+Model accuracy is measured separately with fictional labelled documents:
+
+```bash
+bash scripts/homeflow.sh models          # once: download the default models
+bash scripts/homeflow.sh eval --limit 5  # quick check; drop --limit for all 33 documents
+bash scripts/homeflow.sh test-worker     # worker and evaluation unit tests (no models needed)
+```
+
+Reports go to `worker/evaluation/results/`. See `worker/evaluation/README.md` to compare models.
 
 ## 12. Troubleshooting by workflow
 

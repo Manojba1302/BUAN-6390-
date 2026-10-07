@@ -1,6 +1,6 @@
 """Team coding standard (Oct 1 meeting): no function longer than 20 lines.
 
-The docstring does not count. Checks the API, the worker and the shared code.
+The docstring does not count. Checks the API, the worker, the evaluation tool and the shared code.
 Run: python -m unittest tests.code_standards_test   (from backend/)
 """
 import ast
@@ -12,7 +12,7 @@ MAX_LINES = 20
 BACKEND = Path(__file__).resolve().parents[1]
 ROOT = BACKEND.parent
 # Works from a checkout (all three folders) and inside the backend container (app + /srv/shared).
-CANDIDATES = [BACKEND / "app", ROOT / "worker" / "worker", Path(os.getenv("SHARED_DIR", ROOT / "shared"))]
+CANDIDATES = [BACKEND / "app", ROOT / "worker" / "worker", ROOT / "worker" / "evaluation", Path(os.getenv("SHARED_DIR", ROOT / "shared"))]
 SOURCES = [folder for folder in CANDIDATES if folder.is_dir()]
 
 
