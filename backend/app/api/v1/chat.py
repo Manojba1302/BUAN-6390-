@@ -50,7 +50,6 @@ def ask(body: Ask, db: Session = Depends(get_db),
         customer: Customer = Depends(current_customer)) -> dict:
     if not body.question.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ask a question")
-
     try:
         vector = ollama.embed(model=EMBED_MODEL, text=body.question)
     except ollama.OllamaError as exc:
@@ -61,19 +60,18 @@ def ask(body: Ask, db: Session = Depends(get_db),
     if not passages:
         return {"answer": "I could not find anything in your documents that answers that.",
                 "citations": [], "evidence": []}
-
-    prompt = SYSTEM + "\n\nEvidence:\n" + "\n\n".join(
-        f"[{p['original_name']}, page {p['page']}] {p['content']}" for p in passages)
-    prompt += f"\n\nQuestion: {body.question}\n"
-
     try:
-        answer = ollama.generate_json(model=ANSWER_MODEL, prompt=prompt, timeout=90.0)
+        answer = ollama.generate_json(model=ANSWER_MODEL, prompt=_prompt(body.question, passages), timeout=90.0)
     except ollama.OllamaError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-
     return {"answer": answer.get("answer", ""),
             "citations": answer.get("citations", []),
             "evidence": passages}
+
+
+def _prompt(question: str, passages: list[dict]) -> str:
+    evidence = "\n\n".join(f"[{p['original_name']}, page {p['page']}] {p['content']}" for p in passages)
+    return SYSTEM + "\n\nEvidence:\n" + evidence + f"\n\nQuestion: {question}\n"
 
 
 def _retrieve(db: Session, customer: Customer, vector: list[float],
@@ -85,7 +83,7 @@ def _retrieve(db: Session, customer: Customer, vector: list[float],
         FROM document_chunk c
         JOIN file f ON f.file_id = c.file_id
         WHERE c.customer_id = :customer_id
-          AND (:application_id IS NULL OR f.application_id = CAST(:application_id AS uuid))
+          AND (CAST(:application_id AS uuid) IS NULL OR f.application_id = CAST(:application_id AS uuid))
         ORDER BY c.embedding <=> CAST(:vec AS vector)
         LIMIT :k
     """

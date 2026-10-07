@@ -53,20 +53,7 @@ def classify(document: dict, selected_type: str) -> dict:
     Pages that disagree mean the file holds more than one document, which we
     flag rather than tagging twelve pages as one W-2.
     """
-    per_page: list[str] = []
-    evidence: list[str] = []
-    readable = False
-
-    for index, page in enumerate(document["pages"][:6]):      # six is plenty
-        text = page.get("text") or ""
-        if len(text.strip()) >= MIN_OCR_CHARS:
-            readable = True
-        regex_type = doc_types.regex_vote(text)
-        model_type, found = _ask_model(page, text)
-        per_page.append(doc_types.reconcile(model_type, regex_type))
-        if index == 0:
-            evidence = found
-
+    per_page, evidence, readable = _classify_pages(document["pages"][:6])     # six is plenty
     if not per_page:
         return _result(selected_type, doc_types.UNKNOWN, False, [], False)
 
@@ -74,6 +61,22 @@ def classify(document: dict, selected_type: str) -> dict:
     mixed = len(distinct) > 1
     detected = per_page[0] if not mixed else doc_types.UNKNOWN
     return _result(selected_type, detected, readable, evidence, mixed)
+
+
+def _classify_pages(pages: list[dict]) -> tuple[list[str], list[str], bool]:
+    """Type of each page, the first page's evidence, and whether any page was readable."""
+    per_page: list[str] = []
+    evidence: list[str] = []
+    readable = False
+    for index, page in enumerate(pages):
+        text = page.get("text") or ""
+        if len(text.strip()) >= MIN_OCR_CHARS:
+            readable = True
+        model_type, found = _ask_model(page, text)
+        per_page.append(doc_types.reconcile(model_type, doc_types.regex_vote(text)))
+        if index == 0:
+            evidence = found
+    return per_page, evidence, readable
 
 
 def _ask_model(page: dict, text: str) -> tuple[str, list[str]]:
@@ -117,36 +120,46 @@ def extract(document: dict, document_tag: str) -> dict[str, dict]:
 
     prompt = doc_types.extraction_prompt(document_tag)
     out: dict[str, dict] = {}
-
     for index, page in enumerate(document["pages"][:6], start=1):
-        text = (page.get("text") or "").strip()
-        images = [page["image"]] if page.get("image") else None
-        if not text and not images:
-            continue
-
-        page_prompt = prompt + (f"\n\nPage {index} text:\n{text[:6000]}" if text else "")
-        model = config.vision_model if images else config.extractor_model
-        try:
-            answer = ollama.generate_json(model=model, prompt=page_prompt,
-                                          images=images, timeout=180.0)
-        except ollama.OllamaError as exc:
-            log.warning("extraction failed on page %s: %s", index, exc)
-            raise
-
-        for name, payload in (answer.get("fields") or {}).items():
-            if name not in spec["extract"] or name in out:
-                continue
-            value = _clean(payload)
-            if value is None:
-                continue                      # a missing value stays missing
-            out[name] = {
-                "value": value,
-                "normalized": _normalise(name, value),
-                "page": index,
-                "quote": str(payload.get("quote") or "")[:500] if isinstance(payload, dict) else "",
-                "method": "vision" if images else page.get("method", "native_text"),
-            }
+        answer = _extract_page(prompt, page, index)
+        if answer is not None:
+            _collect_fields(out, answer, spec, page, index)
     return out
+
+
+def _extract_page(prompt: str, page: dict, index: int) -> dict | None:
+    """Ask the model about one page. None when the page has nothing to read."""
+    text = (page.get("text") or "").strip()
+    images = [page["image"]] if page.get("image") else None
+    if not text and not images:
+        return None
+    page_prompt = prompt + (f"\n\nPage {index} text:\n{text[:6000]}" if text else "")
+    model = config.vision_model if images else config.extractor_model
+    try:
+        return ollama.generate_json(model=model, prompt=page_prompt, images=images, timeout=180.0)
+    except ollama.OllamaError as exc:
+        log.warning("extraction failed on page %s: %s", index, exc)
+        raise
+
+
+def _collect_fields(out: dict, answer: dict, spec: dict, page: dict, index: int) -> None:
+    """Add this page's fields. The first page to give a field wins; a missing value stays missing."""
+    for name, payload in (answer.get("fields") or {}).items():
+        if name not in spec["extract"] or name in out:
+            continue
+        value = _clean(payload)
+        if value is not None:
+            out[name] = _field_entry(name, value, payload, page, index)
+
+
+def _field_entry(name: str, value: str, payload, page: dict, index: int) -> dict:
+    return {
+        "value": value,
+        "normalized": _normalise(name, value),
+        "page": index,
+        "quote": str(payload.get("quote") or "")[:500] if isinstance(payload, dict) else "",
+        "method": "vision" if page.get("image") else page.get("method", "native_text"),
+    }
 
 
 def _clean(payload) -> str | None:

@@ -30,49 +30,80 @@ def _s3():
 
 
 def handle(job: dict) -> None:
+    """Process one file: read, classify, extract, write markdown, embed, save."""
     file_id = job["file_id"]
+    record = _claim(file_id)
+    if record is None:
+        return
+    document = _read_document(file_id, record)
+    classification = _classify(file_id, document, record)
+    fields = _extract_fields(file_id, document, record, classification)
+    md_path, markdown = _write_markdown(file_id, document, record, fields)
+    chunks = pipeline.embed_chunks(pipeline.chunk(document))
+    _save_results(file_id, record, document, classification, fields, md_path, markdown, chunks)
+    log.info("file %s: done, %s chunks embedded", file_id, len(chunks))
+
+
+def _claim(file_id: str) -> dict | None:
+    """Mark the file as processing. None means drop the job (gone or retried too often)."""
     with db.session() as conn:
         record = db.fetch_file(conn, file_id)
         if record is None:
             log.warning("file %s is gone, dropping the job", file_id)
-            return
+            return None
         attempts = db.bump_attempts(conn, file_id)
         db.set_status(conn, file_id, "processing")
-
     if attempts > config.max_attempts:
         with db.session() as conn:
             db.set_status(conn, file_id, "failed", error="Too many attempts")
-        return
+        return None
+    return record
 
+
+def _read_document(file_id: str, record: dict) -> dict:
     body = _s3().get_object(Bucket=config.s3_bucket, Key=record["storage_key"])["Body"].read()
     document = pipeline.read(body, record["content_type"], record["original_name"])
     log.info("file %s: %s pages read", file_id, len(document["pages"]))
+    return document
 
+
+def _classify(file_id: str, document: dict, record: dict) -> dict:
     classification = pipeline.classify(document, record["document_tag"])
     with db.session() as conn:
         db.save_classification(conn, file_id, classification)
     log.info("file %s: classified %s (%s)", file_id,
              classification["detected"], classification["outcome"])
+    return classification
 
-    fields = {}
-    if classification["outcome"] in ("matched", "mismatched"):
-        # The customer's tag decides which schema runs. They confirmed it.
-        fields = pipeline.extract(document, record["document_tag"])
-        log.info("file %s: %s fields extracted", file_id, len(fields))
 
+def _extract_fields(file_id: str, document: dict, record: dict, classification: dict) -> dict:
+    """Only a recognised document is extracted. The customer's tag picks the schema; they confirmed it."""
+    if classification["outcome"] not in ("matched", "mismatched"):
+        return {}
+    fields = pipeline.extract(document, record["document_tag"])
+    log.info("file %s: %s fields extracted", file_id, len(fields))
+    return fields
+
+
+def _write_markdown(file_id: str, document: dict, record: dict, fields: dict):
     markdown = pipeline.to_markdown(document, file_name=record["original_name"],
                                     document_tag=record["document_tag"], fields=fields)
     config.markdown_dir.mkdir(parents=True, exist_ok=True)
     md_path = config.markdown_dir / f"{file_id}.md"
     md_path.write_text(markdown, encoding="utf-8")
+    return md_path, markdown
 
-    chunks = pipeline.embed_chunks(pipeline.chunk(document))
 
+def _model_for(payload: dict) -> str:
+    return config.vision_model if payload["method"] == "vision" else config.extractor_model
+
+
+def _save_results(file_id, record, document, classification, fields, md_path, markdown, chunks) -> None:
+    """Everything the job produced, saved in one transaction."""
     with db.session() as conn:
         db.clear_extractions(conn, file_id)
         for name, payload in fields.items():
-            db.save_extraction(conn, file_id, name, payload,
-                               config.vision_model if payload["method"] == "vision" else config.extractor_model)
+            db.save_extraction(conn, file_id, name, payload, _model_for(payload))
         db.save_markdown(conn, file_id, str(md_path), len(markdown))
         db.replace_chunks(conn, file_id, str(record["customer_id"]), chunks)
         db.set_status(conn, file_id, "completed", pages=len(document["pages"]))
@@ -81,7 +112,6 @@ def handle(job: dict) -> None:
                  file_id=file_id,
                  payload={"fields": len(fields), "chunks": len(chunks),
                           "outcome": classification["outcome"]})
-    log.info("file %s: done, %s chunks embedded", file_id, len(chunks))
 
 
 def on_message(channel, method, _properties, body) -> None:

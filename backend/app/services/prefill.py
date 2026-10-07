@@ -61,8 +61,18 @@ def apply_file(db: Session, *, file: File) -> dict:
 
     rows = db.scalars(select(Extraction).where(Extraction.file_id == file.file_id)).all()
     values = {r.field_name: r for r in rows if (r.corrected_value or r.value_raw)}
-    applied = skipped = 0
+    applied, skipped = _apply_direct(db, file, values)
+    if file.document_tag in ("paystub", "w2"):
+        _apply_employment(db, file, values)
+    if file.document_tag == "bank_statement":
+        _apply_asset(db, file, values)
+    db.commit()
+    return {"applied": applied, "skipped": skipped}
 
+
+def _apply_direct(db: Session, file: File, values: dict[str, Extraction]) -> tuple[int, int]:
+    """The one-to-one fields. Returns (applied, skipped because the customer confirmed them)."""
+    applied = skipped = 0
     for doc_field, row in values.items():
         target = DIRECT_MAP.get((file.document_tag, doc_field))
         if not target or target in NEVER_PREFILL:
@@ -71,18 +81,16 @@ def apply_file(db: Session, *, file: File) -> dict:
             applied += 1
         else:
             skipped += 1
-
-    if file.document_tag in ("paystub", "w2"):
-        _apply_employment(db, file, values)
-    if file.document_tag == "bank_statement":
-        _apply_asset(db, file, values)
-
-    db.commit()
-    return {"applied": applied, "skipped": skipped}
+    return applied, skipped
 
 
 def _value(row: Extraction) -> str:
     return row.corrected_value or row.value_normalized or row.value_raw or ""
+
+
+def _get(values: dict[str, Extraction], name: str) -> str | None:
+    """The best value for a document field, or None when the document did not have it."""
+    return _value(values[name]) if name in values else None
 
 
 def _set_field(db: Session, file: File, name: str, row: Extraction) -> bool:
@@ -126,10 +134,9 @@ def monthly_from_pay(gross: Decimal, frequency: str | None) -> tuple[Decimal | N
 
 
 def _apply_employment(db: Session, file: File, values: dict[str, Extraction]) -> None:
-    name = _value(values["employer_name"]) if "employer_name" in values else None
+    name = _get(values, "employer_name")
     if not name:
         return
-
     row = db.scalar(select(Employment).where(
         Employment.application_id == file.application_id,
         Employment.employer_name == name))
@@ -137,51 +144,49 @@ def _apply_employment(db: Session, file: File, values: dict[str, Extraction]) ->
         row = Employment(application_id=file.application_id, employer_name=name,
                          source_file_id=file.file_id)
         db.add(row)
-
     if row.source_file_id is None:
         return  # Preserve customer-confirmed employment.
-
     if "position" in values and not row.position:
         row.position = _value(values["position"])
+    _apply_pay(row, file, values)
 
-    gross = _decimal(_value(values["gross_pay"])) if "gross_pay" in values else None
-    freq = _value(values["pay_frequency"]) if "pay_frequency" in values else None
-    if gross is not None:
-        monthly, note = monthly_from_pay(gross, freq)
-        if monthly is not None:
-            row.base = monthly
-            row.pay_frequency = freq
-        else:
-            # We know the gross but not the period. Leave income blank rather
-            # than assume monthly, and let the customer say which it is.
-            row.pay_frequency = None
-            log.info("pay frequency not stated on %s, leaving base blank", file.file_id)
+
+def _apply_pay(row: Employment, file: File, values: dict[str, Extraction]) -> None:
+    gross = _decimal(_get(values, "gross_pay"))
+    freq = _get(values, "pay_frequency")
+    if gross is None:
+        return
+    monthly, _note = monthly_from_pay(gross, freq)
+    if monthly is not None:
+        row.base = monthly
+        row.pay_frequency = freq
+    else:
+        # We know the gross but not the period. Leave income blank rather
+        # than assume monthly, and let the customer say which it is.
+        row.pay_frequency = None
+        log.info("pay frequency not stated on %s, leaving base blank", file.file_id)
 
 
 def _apply_asset(db: Session, file: File, values: dict[str, Extraction]) -> None:
-    institution = _value(values["institution"]) if "institution" in values else None
-    mask = _value(values["account_mask"]) if "account_mask" in values else None
+    institution, mask = _get(values, "institution"), _get(values, "account_mask")
     if not institution:
         return
-
     row = db.scalar(select(Asset).where(
         Asset.application_id == file.application_id,
         Asset.institution == institution,
         Asset.account_mask == mask))
-
-    balance = _decimal(_value(values["ending_balance"])) if "ending_balance" in values else None
-    period_end = _value(values["period_end"]) if "period_end" in values else None
-
+    balance = _decimal(_get(values, "ending_balance"))
+    period_end = _get(values, "period_end")
     if row is None:
         db.add(Asset(application_id=file.application_id, asset_type="Checking Account",
                      institution=institution, account_mask=mask, balance=balance or 0,
                      as_of=period_end or None, source_file_id=file.file_id))
-        return
+    elif row.source_file_id is not None:  # A customer-confirmed asset is left alone.
+        _update_balance(row, file, balance, period_end)
 
-    if row.source_file_id is None:
-        return  # Preserve customer-confirmed assets.
 
-    # Same account, another month. Keep the most recent balance, never add them.
+def _update_balance(row: Asset, file: File, balance: Decimal | None, period_end: str | None) -> None:
+    """Same account, another month. Keep the most recent balance, never add them."""
     if balance is not None and (row.as_of is None or (period_end or "") >= str(row.as_of)):
         row.balance = balance
         row.as_of = period_end or row.as_of
