@@ -1,14 +1,22 @@
-"""ORM models. Column names match db/init/001_schema.sql exactly."""
+"""Backend ORM mappings, including database migrations 003 through 007.
+
+Initialize PostgreSQL with db/init SQL, not Base.metadata.create_all().
+Migration 007 installs the triggers that populate detail customer IDs.
+Document chunks remain managed by the worker SQL rather than this ORM.
+"""
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
-    BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric,
-    SmallInteger, String, Text, func,
+    BigInteger, Boolean, CheckConstraint, Date, DateTime,
+    FetchedValue, ForeignKey, ForeignKeyConstraint, Integer, Numeric,
+    SmallInteger, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PgUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.exc import CompileError
 
 
 class Base(DeclarativeBase):
@@ -17,6 +25,29 @@ class Base(DeclarativeBase):
 
 def _pk() -> Mapped[UUID]:
     return mapped_column(PgUUID(as_uuid=True), primary_key=True, default=uuid4)
+
+
+class _PartialSetNullForeignKey(ForeignKeyConstraint):
+    """Represent PostgreSQL's column-specific SET NULL with SQLAlchemy 2.0.36."""
+
+    def __init__(self, columns, refcolumns, *, null_column, **kwargs):
+        if null_column not in columns:
+            raise ValueError("The cleared column must belong to the foreign key.")
+        self.null_column = null_column
+        super().__init__(columns, refcolumns, **kwargs)
+
+
+@compiles(_PartialSetNullForeignKey, "postgresql")
+def _compile_partial_set_null(constraint, compiler, **kwargs):
+    # Clear only the optional link; keep the required customer ID.
+    base = compiler.visit_foreign_key_constraint(constraint, **kwargs)
+    column = compiler.preparer.quote(constraint.null_column)
+    return base + f" ON DELETE SET NULL ({column})"
+
+
+@compiles(_PartialSetNullForeignKey)
+def _unsupported_partial_set_null(constraint, compiler, **kwargs):
+    raise CompileError("HomeFlow ownership constraints require PostgreSQL.")
 
 
 class Customer(Base):
@@ -32,6 +63,15 @@ class Customer(Base):
 
 class Application(Base):
     __tablename__ = "application"
+
+    # Allow the application and its customer to be referenced together.
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id",
+            "customer_id",
+            name="application_id_customer_id_unique",
+        ),
+    )
     application_id: Mapped[UUID] = _pk()
     customer_id: Mapped[UUID] = mapped_column(ForeignKey("customer.customer_id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(Text, default="draft")
@@ -45,6 +85,30 @@ class Application(Base):
 
 class ApplicationField(Base):
     __tablename__ = "application_field"
+
+    __table_args__ = (
+        # Keep the detail record linked to its application's customer.
+        ForeignKeyConstraint(
+            ["application_id", "customer_id"],
+            ["application.application_id", "application.customer_id"],
+            name="application_field_application_customer_fkey",
+        ),
+        # Require the source file to belong to the same customer.
+        _PartialSetNullForeignKey(
+            ["file_id", "customer_id"],
+            ["file.file_id", "file.customer_id"],
+            null_column="file_id",
+            name="application_field_source_file_customer_fkey",
+        ),
+    )
+
+    # PostgreSQL assigns the customer from the parent application.
+    customer_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        nullable=False,
+        server_default=FetchedValue(),
+        server_onupdate=FetchedValue(),
+    )
     application_id: Mapped[UUID] = mapped_column(
         ForeignKey("application.application_id", ondelete="CASCADE"), primary_key=True)
     field_name: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -61,6 +125,30 @@ class ApplicationField(Base):
 
 class Employment(Base):
     __tablename__ = "employment"
+
+    __table_args__ = (
+        # Keep the detail record linked to its application's customer.
+        ForeignKeyConstraint(
+            ["application_id", "customer_id"],
+            ["application.application_id", "application.customer_id"],
+            name="employment_application_customer_fkey",
+        ),
+        # Require the source file to belong to the same customer.
+        _PartialSetNullForeignKey(
+            ["source_file_id", "customer_id"],
+            ["file.file_id", "file.customer_id"],
+            null_column="source_file_id",
+            name="employment_source_file_customer_fkey",
+        ),
+    )
+
+    # PostgreSQL assigns the customer from the parent application.
+    customer_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        nullable=False,
+        server_default=FetchedValue(),
+        server_onupdate=FetchedValue(),
+    )
     employment_id: Mapped[UUID] = _pk()
     application_id: Mapped[UUID] = mapped_column(ForeignKey("application.application_id", ondelete="CASCADE"))
     belongs_to: Mapped[str] = mapped_column(Text, default="borrower")
@@ -81,6 +169,30 @@ class Employment(Base):
 
 class Asset(Base):
     __tablename__ = "asset"
+
+    __table_args__ = (
+        # Keep the detail record linked to its application's customer.
+        ForeignKeyConstraint(
+            ["application_id", "customer_id"],
+            ["application.application_id", "application.customer_id"],
+            name="asset_application_customer_fkey",
+        ),
+        # Require the source file to belong to the same customer.
+        _PartialSetNullForeignKey(
+            ["source_file_id", "customer_id"],
+            ["file.file_id", "file.customer_id"],
+            null_column="source_file_id",
+            name="asset_source_file_customer_fkey",
+        ),
+    )
+
+    # PostgreSQL assigns the customer from the parent application.
+    customer_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        nullable=False,
+        server_default=FetchedValue(),
+        server_onupdate=FetchedValue(),
+    )
     asset_id: Mapped[UUID] = _pk()
     application_id: Mapped[UUID] = mapped_column(ForeignKey("application.application_id", ondelete="CASCADE"))
     belongs_to: Mapped[str] = mapped_column(Text, default="borrower")
@@ -115,6 +227,36 @@ class Declaration(Base):
 
 class File(Base):
     __tablename__ = "file"
+
+    __table_args__ = (
+        # Preserve the vault file when its application is deleted.
+        _PartialSetNullForeignKey(
+            ["application_id", "customer_id"],
+            ["application.application_id", "application.customer_id"],
+            null_column="application_id",
+            name="file_application_customer_fkey",
+        ),
+        # Allow the file and its customer to be referenced together.
+        UniqueConstraint(
+            "file_id",
+            "customer_id",
+            name="file_id_customer_id_unique",
+        ),
+
+        # Prevent negative file metadata.
+        CheckConstraint(
+            "size_bytes >= 0",
+            name="file_size_bytes_nonnegative",
+        ),
+        CheckConstraint(
+            "page_count >= 0",
+            name="file_page_count_nonnegative",
+        ),
+        CheckConstraint(
+            "attempts >= 0",
+            name="file_attempts_nonnegative",
+        ),
+    )
     file_id: Mapped[UUID] = _pk()
     customer_id: Mapped[UUID] = mapped_column(ForeignKey("customer.customer_id", ondelete="CASCADE"))
     application_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
