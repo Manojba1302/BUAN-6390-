@@ -29,9 +29,7 @@ def classify(*, body: bytes, content_type: str | None, name: str, selected_type:
         log.warning("could not render page 1 of %s: %s", name, exc)
         return _result(selected_type, doc_types.UNKNOWN, False, [], started, failed=True)
 
-    text = _page_one_text(body, content_type, name)
-    regex_type = doc_types.regex_vote(text)
-
+    regex_type = doc_types.regex_vote(_page_one_text(body, content_type, name))
     try:
         answer = ollama.generate_json(
             model=settings.classifier_model,
@@ -41,18 +39,24 @@ def classify(*, body: bytes, content_type: str | None, name: str, selected_type:
         )
     except ollama.OllamaError as exc:
         log.warning("stage 1 model call failed: %s", exc)
-        # The model being down must not block an upload. Fall back to the
-        # regex vote, and say unknown rather than guessing.
-        detected = regex_type or doc_types.UNKNOWN
-        result = _result(selected_type, detected, True, [], started, failed=not regex_type)
-        if not regex_type:
-            result["message"] = "Document checking is unavailable. Check that the vision model is installed and running, then retry Submit."
-        return result
+        return _fallback_result(selected_type, regex_type, started)
+    return _model_result(answer, selected_type, regex_type, started)
 
+
+def _fallback_result(selected_type: str, regex_type: str | None, started: float) -> dict:
+    """The model being down must not block an upload. Fall back to the
+    regex vote, and say unknown rather than guessing."""
+    detected = regex_type or doc_types.UNKNOWN
+    result = _result(selected_type, detected, True, [], started, failed=not regex_type)
+    if not regex_type:
+        result["message"] = "Document checking is unavailable. Check that the vision model is installed and running, then retry Submit."
+    return result
+
+
+def _model_result(answer: dict, selected_type: str, regex_type: str | None, started: float) -> dict:
     detected = str(answer.get("document_type", doc_types.UNKNOWN)).strip().lower()
     if detected not in doc_types.type_ids():
         detected = doc_types.UNKNOWN
-
     readable = bool(answer.get("readable", True))
     evidence = [str(e) for e in (answer.get("evidence") or [])][:4]
     final = doc_types.reconcile(detected, regex_type)

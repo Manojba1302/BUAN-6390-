@@ -72,45 +72,55 @@ async def upload(
     choice of category is what we record, even when stage 1 disagreed."""
     body = await file.read()
     _check_upload(file, body, document_tag)
-
-    if application_id is not None:
-        app = db.get(Application, application_id)
-        if app is None or app.customer_id != customer.customer_id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
-
-    digest = storage.checksum(body)
+    _check_application(db, application_id, customer)
     existing = db.scalar(select(File).where(
-        File.customer_id == customer.customer_id, File.checksum == digest))
+        File.customer_id == customer.customer_id, File.checksum == storage.checksum(body)))
     if existing:
         return {"file_id": str(existing.file_id), "status": existing.status,
                 "duplicate_of": str(existing.file_id),
                 "message": "You have already uploaded this file."}
+    row = _store_file(db, customer, file, body, document_tag, application_id, logical_path)
+    audit.record(db, action="document.uploaded", customer_id=customer.customer_id,
+                 application_id=application_id, file_id=row.file_id,
+                 payload={"document_tag": document_tag, "confirmed_mismatch": confirmed_mismatch})
+    db.commit()
+    _queue_file(row)
+    return {"file_id": str(row.file_id), "status": row.status,
+            "document_tag": row.document_tag, "original_name": row.original_name}
 
+
+def _check_application(db: Session, application_id: UUID | None, customer: Customer) -> None:
+    """A file can only be attached to the caller's own application."""
+    if application_id is None:
+        return
+    app = db.get(Application, application_id)
+    if app is None or app.customer_id != customer.customer_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+
+
+def _store_file(db: Session, customer: Customer, upload: UploadFile, body: bytes, document_tag: str,
+                application_id: UUID | None, logical_path: str) -> File:
+    """Put the bytes in object storage (flat key) and add the file row."""
     row = File(
         file_id=uuid.uuid4(), customer_id=customer.customer_id, application_id=application_id,
-        document_tag=document_tag, original_name=file.filename or "upload",
-        content_type=file.content_type, size_bytes=len(body), checksum=digest,
+        document_tag=document_tag, original_name=upload.filename or "upload",
+        content_type=upload.content_type, size_bytes=len(body), checksum=storage.checksum(body),
         storage_key="", logical_path=logical_path or "/", status="queued",
     )
     row.storage_key = storage.storage_key(row.file_id, row.original_name)
-    storage.put_object(row.storage_key, body, file.content_type)
+    storage.put_object(row.storage_key, body, upload.content_type)
     db.add(row)
+    return row
 
-    audit.record(db, action="document.uploaded", customer_id=customer.customer_id,
-                 application_id=application_id, file_id=row.file_id,
-                 payload={"document_tag": document_tag,
-                          "confirmed_mismatch": confirmed_mismatch})
-    db.commit()
 
+def _queue_file(row: File) -> None:
+    """Hand the file to the worker. If the queue is down the file is still safe in storage."""
     try:
         queue.publish_extraction_job(
-            customer_id=customer.customer_id, application_id=application_id,
-            file_id=row.file_id, document_tag=document_tag, trace_id=str(uuid.uuid4()))
-    except Exception as exc:                      # queue down, file is safe
+            customer_id=row.customer_id, application_id=row.application_id,
+            file_id=row.file_id, document_tag=row.document_tag, trace_id=str(uuid.uuid4()))
+    except Exception as exc:
         log.error("could not queue %s: %s", row.file_id, exc)
-
-    return {"file_id": str(row.file_id), "status": row.status,
-            "document_tag": row.document_tag, "original_name": row.original_name}
 
 
 @router.get("")
@@ -262,25 +272,34 @@ def delete_permanently(file_id: UUID, db: Session = Depends(get_db),
     if row.status in ("queued", "processing"):
         raise HTTPException(409, "Wait for document processing to finish before deleting.")
     _clear_proposals(db, row)
-    # Retained customer-confirmed values no longer refer to deleted evidence.
-    for field in db.scalars(select(ApplicationField).where(ApplicationField.file_id == file_id)):
-        field.file_id = None
-        field.evidence_quote = None
-        field.page = None
-        field.method = None
-    md = db.get(DocumentMarkdown, file_id)
-    if md:
-        directory = Path(settings.markdown_dir).resolve()
-        path = Path(md.markdown_path).resolve()
-        if path.parent != directory or path.name != f"{file_id}.md":
-            raise HTTPException(500, "Document storage path is invalid.")
-        path.unlink(missing_ok=True)
+    _detach_confirmed_values(db, file_id)
+    _delete_markdown(db, file_id)
     storage.delete_object(row.storage_key)
     audit.record(db, action="document.deleted", customer_id=customer.customer_id,
                  application_id=row.application_id, file_id=file_id)
     db.delete(row)  # PostgreSQL cascades classification, extraction, markdown and vectors.
     db.commit()
     return Response(status_code=204)
+
+
+def _detach_confirmed_values(db: Session, file_id: UUID) -> None:
+    """Retained customer-confirmed values no longer refer to deleted evidence."""
+    for field in db.scalars(select(ApplicationField).where(ApplicationField.file_id == file_id)):
+        field.file_id = None
+        field.evidence_quote = None
+        field.page = None
+        field.method = None
+
+
+def _delete_markdown(db: Session, file_id: UUID) -> None:
+    md = db.get(DocumentMarkdown, file_id)
+    if not md:
+        return
+    directory = Path(settings.markdown_dir).resolve()
+    path = Path(md.markdown_path).resolve()
+    if path.parent != directory or path.name != f"{file_id}.md":
+        raise HTTPException(500, "Document storage path is invalid.")
+    path.unlink(missing_ok=True)
 
 
 def _owned_file(db: Session, file_id: UUID, customer: Customer) -> File:
