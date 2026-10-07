@@ -123,3 +123,18 @@ or deletion of physical files from MinIO.
 Fresh database initialization was verified on October 6, 2026.
 All six scripts (`001`, `003`, `004`, `005`, `006` and `007`)
 ran successfully in order on an empty database, with no initialization errors.
+
+## W-2 Checklist Update
+
+The current schema requires two W-2 files, with guidance to provide
+documents for the two most recent tax years.
+
+Retain `db/migrations/002_w2_two_years.sql` to update older databases.
+New databases receive this setting through `001_schema.sql`.
+
+The local database was checked on October 7, 2026, and already has
+the correct setting. No update was required.
+
+The checklist checks file count only. It does not confirm that the
+uploaded W-2s cover two distinct tax years.
+
