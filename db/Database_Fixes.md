@@ -123,3 +123,49 @@ or deletion of physical files from MinIO.
 Fresh database initialization was verified on October 6, 2026.
 All six scripts (`001`, `003`, `004`, `005`, `006` and `007`)
 ran successfully in order on an empty database, with no initialization errors.
+
+## Document workflow testing — October 7, 2026
+
+Testing used the fictional file `alex_bank_statement_sample.pdf`
+on a local Docker environment.
+
+### Verified results
+
+- The upload created one file record linked to the application.
+  No duplicate was found for this filename and application.
+- Processing completed: one page was read and nine fields were
+  saved with source-page references and supporting text.
+- The extracted name, dates and amounts matched the sample.
+- One document chunk and a 768-dimensional embedding were saved.
+  The chunk and source file had matching customer IDs.
+- The document appeared in the application and My vault.
+- An institution-name edit was saved separately from the original
+  AI value, marked as corrected and retained after refreshing.
+- A search for the closing balance retrieved page 1 of the sample,
+  containing the $5,000 closing balance.
+- A simulated different customer ID retrieved no documents,
+  both with and without an application filter.
+
+### Search query fix
+
+The older local copy of `backend/app/api/v1/chat.py` failed because
+PostgreSQL could not determine the application ID parameter type.
+
+Adding an explicit UUID cast to the NULL check resolved the error.
+The GitHub code reviewed already contained this fix.
+
+### Limitations and follow-up
+
+- These results cover one fictional bank statement.
+- The customer-filter test called the retrieval function directly.
+  It does not verify login or API access controls.
+- Retrieval was tested; generated chat answers and their citations
+  were not tested.
+- An Ollama classification request returned an error, although
+  background processing later completed successfully.
+- The upload screen did not clearly show completion during testing.
+  The saved document became visible after closing and refreshing.
+- Other document types, date coverage and missing-page checks
+  still require testing.
+
+
