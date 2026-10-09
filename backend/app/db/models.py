@@ -334,23 +334,62 @@ class ChecklistRequirement(Base):
     guidance: Mapped[str | None] = mapped_column(Text)
     sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
 
+# Store one login account per customer.
 class AuthAccount(Base):
     __tablename__ = "auth_account"
-    customer_id: Mapped[UUID] = mapped_column(ForeignKey("customer.customer_id"), primary_key=True)
+    __table_args__ = (
+        CheckConstraint(
+            "failed_attempts >= 0",
+            name="auth_account_failed_attempts_check",
+        ),
+    )
+
+    customer_id: Mapped[UUID] = mapped_column(
+        ForeignKey("customer.customer_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
-    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Failed attempts start at zero and cannot be negative.
+    failed_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False,
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+
+
+# Delete related sessions when a customer is deleted.
 class AuthSession(Base):
     __tablename__ = "auth_session"
-    token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
-    customer_id: Mapped[UUID] = mapped_column(ForeignKey("customer.customer_id"), index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
+    token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
+    customer_id: Mapped[UUID] = mapped_column(
+        ForeignKey("customer.customer_id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+
+
+# Store password-reset links for each customer.
 class PasswordReset(Base):
     __tablename__ = "password_reset"
+
     token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
-    customer_id: Mapped[UUID] = mapped_column(ForeignKey("customer.customer_id"), index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    customer_id: Mapped[UUID] = mapped_column(
+        ForeignKey("customer.customer_id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+
+    # New reset links start as unused.
+    used: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
