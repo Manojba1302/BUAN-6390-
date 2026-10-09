@@ -1,140 +1,265 @@
-# Database Integrity and Ownership Checks
+# Database Fixes and Verification
 
-## Purpose
+## Overview
 
-Keep customer, application and document records correctly connected.
-These rules prevent incorrect ownership, invalid source-file links
-and negative file metadata.
+These changes improve the reliability of the HomeFlow PostgreSQL database.
 
-## Migrations
+They keep customer records linked correctly, prevent invalid file metadata,
+preserve application information when a source file is deleted, and provide
+consistent login-table rules.
 
-All migration files listed below are in `db/init`.
+This document explains each change, how to apply it, and what has been verified.
 
-| Migration | What it does |
+## 1. Changes Included
+
+| Script | Location | Purpose |
+|---|---|---|
+| `003_file_application_ownership.sql` | `db/init` | Ensures a file and its linked application belong to the same customer. |
+| `004_document_chunk_ownership.sql` | `db/init` | Ensures document chunks belong to the customer who owns the source file. |
+| `005_file_metadata_checks.sql` | `db/init` | Prevents negative file sizes, page counts, and processing-attempt counts. |
+| `006_source_file_relationships.sql` | `db/init` | Links application fields, employment records, and asset records to existing source files. |
+| `007_source_file_customer_ownership.sql` | `db/init` | Ensures application details and their source files belong to the same customer. |
+| `008_auth.sql` | `db/init` | Creates the login account, session, and password-reset tables when they are missing. |
+| `009_auth_existing_tables.sql` | `db/migrations` | Updates existing login tables with the expected defaults, checks, and deletion rules. |
+
+The base database structure is defined in `db/init/001_schema.sql`.
+
+## 2. Customer Ownership and Relationships
+
+### Files and applications
+
+A file can be linked to an application only when both belong to the same customer.
+
+Deleting an application clears the file's application link and preserves
+the file record in the customer's vault.
+
+### Document chunks
+
+Document chunks are smaller sections of document text used for search.
+
+Each chunk must belong to the same customer as its source file.
+Deleting a file record also deletes its related chunks.
+
+### Application details and source files
+
+Application fields, employment records, and asset records can reference
+the documents that supplied their information.
+
+The database checks that:
+
+- The source file exists when a source-file link is provided.
+- The detail record belongs to the customer who owns its application.
+- The source file belongs to that same customer.
+
+Deleting a source file clears the source-file link while preserving
+the application detail record.
+
+Deleting an application removes its related detail records.
+
+These rules protect database relationships. They do not replace
+application-level permission checks.
+
+## 3. File Metadata
+
+The database rejects negative values in:
+
+- `size_bytes`: the file size.
+- `page_count`: the number of pages.
+- `attempts`: the number of processing attempts.
+
+Zero is allowed. File size and page count may be unknown (`NULL`).
+Processing attempts must have a value.
+
+## 4. Login Tables
+
+The login-related tables are:
+
+| Table | Purpose |
 |---|---|
-| `003_file_application_ownership.sql` | Requires a file and its linked application to belong to the same customer. Deleting the application preserves the file in the customer’s vault. |
-| `004_document_chunk_ownership.sql` | Requires each document chunk to belong to the same customer as its source file. Deleting the file removes its chunks. |
-| `005_file_metadata_checks.sql` | Prevents negative file sizes, page counts and processing attempts. |
-| `006_source_file_relationships.sql` | Requires source-file references in application fields, employment and assets to point to an existing file. |
-| `007_source_file_customer_ownership.sql` | Requires those source files to belong to the same customer as the application. Automatically sets the customer ID on the related detail records. |
+| `auth_account` | Stores the customer's login email, password hash, failed-attempt count, and lock information. |
+| `auth_session` | Stores login-session token hashes and expiry times. |
+| `password_reset` | Stores password-reset token hashes, expiry times, and whether a token has been used. |
 
-Zero values are allowed for file metadata. File size and page count
-may be unknown (`NULL`); processing attempts remain required.
+The database rules ensure that:
 
-Deleting a source file preserves the application field, employment
-or asset record and clears its source-file reference.
+- Each customer has at most one login account.
+- Login email addresses are unique.
+- Failed login attempts default to `0` and cannot be negative.
+- Password-reset records default to unused (`false`).
+- Deleting a customer also deletes their related login account,
+  sessions, and password-reset records.
 
-## Applying the Changes
+The application is responsible for enforcing session expiry,
+reset-token validity, and account-lockout behaviour.
 
-### New Databases
+The authentication models in `backend/app/db/models.py` were updated
+to include the customer-deletion rules, database defaults, and
+nonnegative failed-attempts check.
 
-With the project’s Docker Compose configuration, scripts in `db/init`
+## 5. Applying the Changes
+
+### New databases
+
+With the project's Docker configuration, SQL files in `db/init`
 run in filename order when PostgreSQL initializes an empty data volume.
 
-### Existing Databases
+Script `008_auth.sql` supplies the login-table rules for a new database.
+Script `009_auth_existing_tables.sql` is intended to update older,
+existing login tables.
+
+### Existing databases
 
 Downloading updated code or restarting Docker does not automatically
-apply migrations to an existing database.
+apply SQL changes to an existing database.
 
-1. Connect to the correct HomeFlow database.
-2. Identify which migrations have already been applied.
-3. Run only the missing migrations, in numerical order.
-4. Run each complete migration once, including `BEGIN` and `COMMIT`.
-5. If a migration fails, stop and investigate the error.
+Before applying changes:
 
-These migrations are not designed for repeated execution. Do not delete
-records or the Docker data volume to force a migration to succeed.
+1. Check which scripts and database rules are already installed.
+2. Apply only the missing changes, following their dependencies.
+3. Run each complete script, including its transaction statements.
+4. Stop and investigate if a script reports an error.
 
-Migration `007` depends on the earlier ownership and source-file changes.
-It replaces the three source-file foreign keys introduced by `006`
-with foreign keys that also check customer ownership.
+For login tables:
 
-### Checking Installed Constraints
+- If any login tables are missing, run `008_auth.sql` first.
+- Apply `009_auth_existing_tables.sql` to align existing table rules.
 
-The following constraint names help identify installed changes:
+Script `008_auth.sql` does not change the definitions of tables that
+already exist. Scripts in `db/migrations` require a separate execution step.
 
-| Migration | Constraints |
+Do not rerun scripts blindly or delete database records or Docker
+data volumes to make a migration succeed.
+
+## 6. Verification Completed
+
+### Database setup and relationship checks
+
+The following checks passed locally on October 5–6, 2026:
+
+- Correct file/application ownership was accepted.
+- Incorrect file/application ownership was blocked.
+- Files remained in the customer vault after application deletion.
+- Correct chunk ownership was accepted.
+- Incorrect chunk ownership was blocked.
+- Deleting a file removed its document chunks.
+- Allowed metadata values were accepted and negative values were blocked.
+- Source-file links rejected nonexistent files.
+- Source-file ownership checks blocked another customer's files.
+- Application details were preserved after source-file deletion.
+- Application deletion removed its related detail records.
+
+A fresh database initialized successfully using `001_schema.sql`
+and scripts `003` through `007`.
+
+### Backend model checks
+
+On October 7, 2026:
+
+- The updated application-field, employment, and asset models loaded.
+- All three tables were queried successfully.
+- Test records were saved with the expected customer ownership.
+- Temporary changes were rolled back.
+
+### Sample document workflow
+
+On October 7, 2026, the reusable document workflow test completed
+with 24 passed checks and no failed checks.
+
+The test used one fictional bank statement and confirmed:
+
+- The file was linked to the expected customer and application.
+- Processing completed and file metadata was saved.
+- Nine expected fields were stored with page-one evidence.
+- A reviewed correction was saved separately from the original value.
+- Document text and 768-dimensional embeddings were stored.
+- Retrieval returned the sample document and its source page.
+- An unused customer ID retrieved no documents, with or without
+  an application filter.
+
+The test did not change database records.
+
+### Login-table changes
+
+On October 7, 2026:
+
+- Script `008` created the three login tables in the test database.
+- Script `009` completed in both the test and local HomeFlow databases.
+- Expected defaults and constraints were confirmed in the test database.
+- No negative failed-attempt values existed in the local HomeFlow
+  database before applying `009`.
+- An existing user successfully logged in after the update.
+
+### Setup and model checks — October 9, 2026
+
+- A separate empty database initialized successfully using
+  `001_schema.sql` and scripts `003` through `008`.
+- PostgreSQL completed initialization without reported errors.
+- The three login models loaded successfully with the expected
+  customer-deletion rules, database defaults, and nonnegative
+  failed-attempts check.
+
+These model checks inspected the Python definitions without changing
+database records. They did not test the complete authentication workflow.
+
+## 7. Test Files
+
+The following files are stored in `db/tests`:
+
+| File | Coverage |
 |---|---|
-| `003` | `file_application_customer_fkey` |
-| `004` | `document_chunk_file_customer_fkey` |
-| `005` | `file_size_bytes_nonnegative`, `file_page_count_nonnegative`, `file_attempts_nonnegative` |
-| `006`, before `007` | `application_field_source_file_fkey`, `employment_source_file_fkey`, `asset_source_file_fkey` |
-| `007` | `application_field_source_file_customer_fkey`, `employment_source_file_customer_fkey`, `asset_source_file_customer_fkey` |
+| `test_file_application_ownership.sql` | File/application ownership and vault preservation. |
+| `test_document_chunk_ownership.sql` | Chunk ownership and deletion with its source file. |
+| `test_file_metadata_checks.sql` | Allowed and rejected metadata values. |
+| `test_source_file_relationships.sql` | Source-file references and preservation of detail records. |
+| `test_source_file_customer_ownership.sql` | Customer ownership across applications, details, and source files. |
+| `test_document_workflow.py` | Stored results and direct retrieval for the fictional bank-statement fixture. |
+| `Document_Workflow_Test.md` | Instructions for running the document workflow test. |
 
-After `007` is installed, the original `006` constraint names are
-expected to be absent. Do not rerun `006` because those names are missing.
+Run tests against a separate test database where possible.
 
-If changes appear partially installed, inspect the constraints, columns
-and triggers before running another migration.
+The SQL tests use temporary fictional records and end with `ROLLBACK`.
+If a test stops before reaching `ROLLBACK` in pgAdmin, run `ROLLBACK`
+in the same Query Tool connection.
 
-## Testing
+## 8. W-2 Checklist
 
-After applying all migrations through `007`, run these complete scripts:
+The current database requires two W-2 documents, with guidance requesting
+the two most recent tax years.
 
-- `db/tests/test_file_application_ownership.sql`
-- `db/tests/test_document_chunk_ownership.sql`
-- `db/tests/test_file_metadata_checks.sql`
-- `db/tests/test_source_file_relationships.sql`
-- `db/tests/test_source_file_customer_ownership.sql`
+`db/migrations/002_w2_two_years.sql` remains available for older databases.
+The base schema already includes this requirement for new databases.
 
-Use the latest test files from the repository. The source-file
-relationship test expects the constraint names introduced by `007`.
+A file count of two does not prove that the documents cover two different
+tax years. Date-coverage validation is a separate requirement.
 
-Each test uses fictional records and ends with `ROLLBACK` to remove
-temporary changes. This does not undo previously committed migrations.
+## 9. Remaining Verification
 
-When using pgAdmin, if a test stops before reaching `ROLLBACK`, run
-`ROLLBACK;` in the same Query Tool connection.
+The completed checks do not establish that every application workflow
+is fully tested.
 
-## Verified Results — October 6, 2026
+Remaining work includes:
 
-The following checks passed on a local test database:
+- Testing password reset, session expiry, and account lockout.
+- Testing customer access restrictions through authenticated API requests.
+- Validating AI-generated answers and extraction accuracy across
+  additional document types.
+- Investigating the observed classification error and upload-screen feedback.
+- Confirming physical-file deletion behaviour in MinIO.
 
-| Test area | Checks passed |
-|---|---:|
-| File and application ownership | 3 |
-| Document-chunk ownership | 3 |
-| File metadata | 6 |
-| Source-file relationships, after migration `007` | 7 |
-| Source-file customer ownership | 18 |
+Database relationship tests verify PostgreSQL records. They do not
+verify deletion of physical documents, complete API authorization,
+or overall AI accuracy.
 
-The tests confirmed that:
+## Additional Verification Notes
 
-- Valid relationships are accepted.
-- Incorrect customer ownership is blocked.
-- Nonexistent source files are rejected.
-- Negative metadata values are rejected.
-- Deleting an application preserves its files in the customer vault.
-- Deleting a file removes its document chunks.
-- Deleting a source file preserves application fields, employment and assets.
-- Deleting an application removes its related detail records.
-
-Fresh database initialization was verified with `001`, `003`, `004`
-and `005`. Migrations `006` and `007` were then applied and tested.
-A fresh initialization including all migrations through `007`
-remains to be verified.
-
-## Scope
-
-These tests verify database rules and relationships. They do not verify
-API access controls, AI extraction accuracy, document-period coverage
-or deletion of physical files from MinIO.
-
-Fresh database initialization was verified on October 6, 2026.
-All six scripts (`001`, `003`, `004`, `005`, `006` and `007`)
-ran successfully in order on an empty database, with no initialization errors.
-
-## W-2 Checklist Update
-
-The current schema requires two W-2 files, with guidance to provide
-documents for the two most recent tax years.
-
-Retain `db/migrations/002_w2_two_years.sql` to update older databases.
-New databases receive this setting through `001_schema.sql`.
-
-The local database was checked on October 7, 2026, and already has
-the correct setting. No update was required.
-
-The checklist checks file count only. It does not confirm that the
-uploaded W-2s cover two distinct tax years.
-
+- On October 6, 2026, all six setup scripts (`001`, `003`, `004`,
+  `005`, `006`, and `007`) ran successfully in order on an empty
+  database, without initialization errors.
+- On October 9, 2026, fresh initialization was verified again,
+  including `008_auth.sql`.
+- On October 7, 2026, the local W-2 checklist already required
+  two files for the two most recent tax years. No update was needed.
+- `db/migrations/002_w2_two_years.sql` remains available for older
+  databases. New databases receive this setting through `001_schema.sql`.
+- The W-2 checklist counts files; it does not confirm coverage
+  of two distinct tax years.
