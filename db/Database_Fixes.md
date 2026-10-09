@@ -249,3 +249,17 @@ Remaining work includes:
 Database relationship tests verify PostgreSQL records. They do not
 verify deletion of physical documents, complete API authorization,
 or overall AI accuracy.
+
+## Additional Verification Notes
+
+- On October 6, 2026, all six setup scripts (`001`, `003`, `004`,
+  `005`, `006`, and `007`) ran successfully in order on an empty
+  database, without initialization errors.
+- On October 9, 2026, fresh initialization was verified again,
+  including `008_auth.sql`.
+- On October 7, 2026, the local W-2 checklist already required
+  two files for the two most recent tax years. No update was needed.
+- `db/migrations/002_w2_two_years.sql` remains available for older
+  databases. New databases receive this setting through `001_schema.sql`.
+- The W-2 checklist counts files; it does not confirm coverage
+  of two distinct tax years.
