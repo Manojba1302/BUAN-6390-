@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from uuid import UUID
 
+import money_values
 import doc_types
 from fastapi import APIRouter, Depends, File as UploadField, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
@@ -26,7 +27,8 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 class CorrectionIn(BaseModel):
-    extraction_id: UUID
+    extraction_id: UUID | None = None
+    field_name: str | None = None
     value: str
 
 
@@ -134,7 +136,7 @@ def get_document(file_id: UUID, db: Session = Depends(get_db),
     detail = _summary(db, row)
     detail["extractions"] = [{
         "extraction_id": str(e.extraction_id), "field_name": e.field_name,
-        "value": e.corrected_value or e.value_normalized or e.value_raw,
+        "value": e.corrected_value if e.corrected_value is not None else (money_values.amount(e.field_name, e.value_raw or "", e.evidence_quote or "") or e.value_normalized or e.value_raw),
         "value_raw": e.value_raw, "corrected_value": e.corrected_value,
         "page": e.page, "evidence_quote": e.evidence_quote, "method": e.method,
         "review_state": e.review_state,
@@ -149,7 +151,8 @@ def _missing_fields(document_tag: str, found: list[dict]) -> list[str]:
     if not spec:
         return []
     have = {e["field_name"] for e in found if e["value"]}
-    return [name for name in spec["extract"] if name not in have]
+    full_name_found = bool(have & {"full_name", "employee_name", "name"})
+    return [name for name in spec["extract"] if name not in have and not (full_name_found and name in ("first_name", "last_name"))]
 
 
 @router.get("/{file_id}/content")
@@ -177,7 +180,14 @@ def correct(file_id: UUID, batch: CorrectionBatch, db: Session = Depends(get_db)
     row = _owned_file(db, file_id, customer)
     changed = 0
     for item in batch.corrections:
-        ext = db.get(Extraction, item.extraction_id)
+        ext = db.get(Extraction, item.extraction_id) if item.extraction_id else None
+        if not item.extraction_id and item.field_name in ("first_name", "last_name"):
+            if item.field_name not in (doc_types.get_type(row.document_tag) or {}).get("extract", {}):
+                raise HTTPException(400, "Name field not supported for this type")
+            ext = db.scalar(select(Extraction).where(Extraction.file_id == file_id, Extraction.field_name == item.field_name))
+            if ext is None:
+                ext = Extraction(file_id=file_id, field_name=item.field_name, method=None)
+                db.add(ext)
         if ext is None or ext.file_id != file_id:
             continue
         ext.corrected_value = item.value

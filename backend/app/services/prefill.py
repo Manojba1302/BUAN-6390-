@@ -33,6 +33,10 @@ DIRECT_MAP: dict[tuple[str, str], str] = {
     ("w2", "employee_ssn"): "ssn",
 }
 
+for _tag in ("drivers_license", "paystub", "w2", "ssn_card"):
+    DIRECT_MAP[(_tag, "first_name")] = "firstName"
+    DIRECT_MAP[(_tag, "last_name")] = "lastName"
+
 PAY_PERIODS_PER_YEAR = {"weekly": 52, "biweekly": 26, "semimonthly": 24, "monthly": 12}
 
 NEVER_PREFILL = {"econsent"}  # declarations live in their own table and are never touched

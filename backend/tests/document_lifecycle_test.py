@@ -33,6 +33,7 @@ class DocumentLifecycleTests(unittest.TestCase):
             self.assertEqual(client.post(f"/api/v1/documents/{file_id}/link", json={"application_id":str(application_id)}).status_code, 404)
             self.assertEqual(client.delete(f"/api/v1/documents/{file_id}/permanent").status_code, 404)
             app.dependency_overrides[current_customer] = lambda: Customer(customer_id=owner)
+            self.assertEqual(client.patch(f"/api/v1/documents/{file_id}/extractions",json={"corrections":[{"field_name":"first_name","value":"Example"}]}).status_code,200)
             self.assertEqual(client.delete(f"/api/v1/documents/{file_id}").status_code, 204)
             with SessionLocal() as db:
                 self.assertIsNone(db.get(File, file_id).application_id)

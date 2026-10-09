@@ -19,6 +19,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [names, setNames] = useState({first_name:"",last_name:""});
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
@@ -26,7 +27,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
     if (!fileId) { setDoc(null); return; }
     setEdits({});
     setRevealed({});
-    api.document(fileId).then(setDoc).catch(() => toast("We could not open that document."));
+    api.document(fileId).then(d => {setDoc(d);setNames({first_name:d.extractions.find(e=>e.field_name==="first_name")?.value ?? "",last_name:d.extractions.find(e=>e.field_name==="last_name")?.value ?? ""});}).catch(() => toast("We could not open that document."));
   }, [fileId, toast]);
 
   useEffect(() => {
@@ -44,11 +45,12 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
       })
       .map(([extraction_id, value]) => ({ extraction_id, value }));
 
-    if (!corrections.length) { onClose(); return; }
+    const additions = Object.entries(names).filter(([field,value]) => value.trim() && !doc.extractions.some(e => e.field_name === field)).map(([field_name,value]) => ({field_name,value:value.trim()}));
+    if (!corrections.length && !additions.length) { onClose(); return; }
     setSaving(true);
     try {
-      await api.correct(doc.file_id, corrections);
-      toast(`${corrections.length} correction${corrections.length > 1 ? "s" : ""} saved`, "ok");
+      await api.correct(doc.file_id, [...corrections,...additions]);
+      toast("Document review saved", "ok");
       onSaved();
       onClose();
     } catch {
@@ -104,6 +106,14 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                   </div>
                 )}
 
+                <section className="document-person-review">
+                  {["drivers_license","w2","paystub","ssn_card"].includes(doc.document_tag) && (!doc.extractions.some(e=>e.field_name==="first_name") || !doc.extractions.some(e=>e.field_name==="last_name")) && <>
+                    <h3>Confirm the name parts</h3>
+                    <p className="hint">{doc.extractions.some(e=>["full_name","employee_name","name"].includes(e.field_name) && e.value) ? "A full name was found. Confirm its first and last name; we will not guess how to split it." : "Check the printed name before entering its parts."}</p>
+                    {(["first_name","last_name"] as const).filter(n=>!doc.extractions.some(e=>e.field_name===n)).map(n=><label className="f" key={n}><span className="cap">{n==="first_name" ? "First name" : "Last name"}</span><input className="ctl" value={names[n]} onChange={e=>setNames(x=>({...x,[n]:e.target.value}))} /></label>)}
+                  </>}
+                </section>
+
                 {doc.extractions.map((row) => {
                   const sensitive = SENSITIVE.includes(row.field_name);
                   const shown = edits[row.extraction_id] ?? row.value ?? "";
@@ -113,7 +123,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                     <div className="fieldrow" key={row.extraction_id}>
                       <div className="fr-top">
                         <b>{fieldLabelFromName(row.field_name)}</b>
-                        <span className="chip n">{row.method === "native_text" ? "text" : row.method}</span>
+                        <span className="chip n">{row.method === "native_text" ? "text" : row.method ?? "user entry"}</span>
                         {row.review_state === "corrected" && <span className="chip a">corrected</span>}
                         {sensitive && (
                           <button className="xbtn" aria-label="Show value"

@@ -340,3 +340,7 @@ docker compose -f docker-compose.yml -f compose.auth.yml up --build -d
 ```
 
 Refresh the browser after the services finish starting. These updates preserve existing Docker data volumes; do not use `down -v` to update. Local accounts and documents are not distributed through Git.
+
+
+
+Name review preserves full names and supports user-confirmed first and last name corrections. Document-owner assignment and cross-person prefill policies are deferred pending Vijay’s clarification. Monetary extraction preserves decimal cents; original model readings and user corrections are retained.

@@ -112,7 +112,7 @@ export const api = {
 
   contentUrl: (fileId: string) => `${BASE}/documents/${fileId}/content`,
 
-  correct: (fileId: string, corrections: { extraction_id: string; value: string }[]) =>
+  correct: (fileId: string, corrections: { extraction_id?: string; field_name?: string; value: string }[]) =>
     request<{ corrected: number }>(`/documents/${fileId}/extractions`, json({ corrections })),
 
   linkDocument: (fileId: string, applicationId: string) =>

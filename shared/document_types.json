@@ -27,9 +27,11 @@
         "pay_period_end": "Last day of the pay period, YYYY-MM-DD",
         "pay_date": "Date the pay was issued, YYYY-MM-DD",
         "pay_frequency": "One of weekly, biweekly, semimonthly, monthly. Only if printed on the page.",
-        "gross_pay": "Gross pay for this period, digits only",
-        "net_pay": "Net pay for this period, digits only",
-        "ytd_gross": "Year-to-date gross earnings, digits only"
+        "gross_pay": "Gross pay for this period, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "net_pay": "Net pay for this period, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "ytd_gross": "Year-to-date gross earnings, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "first_name": "Given/first name only when explicitly identifiable from a printed given-name label or a structured employee-name field. Do not guess by splitting an unlabelled full name. Null if unclear.",
+        "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear."
       }
     },
     {
@@ -56,8 +58,10 @@
         "employer_name": "Employer name from box c",
         "employer_ein": "Employer EIN from box b",
         "tax_year": "Four digit tax year",
-        "box1_wages": "Box 1 wages, tips, other compensation, digits only",
-        "box2_federal_tax": "Box 2 federal income tax withheld, digits only"
+        "box1_wages": "Box 1 wages, tips, other compensation, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "box2_federal_tax": "Box 2 federal income tax withheld, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "first_name": "Given/first name only when explicitly identifiable from a printed given-name label or a structured employee-name field. Do not guess by splitting an unlabelled full name. Null if unclear.",
+        "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear."
       }
     },
     {
@@ -84,10 +88,10 @@
         "account_mask": "Last four digits of the account number only, as ****1234",
         "period_start": "First day of the statement period, YYYY-MM-DD",
         "period_end": "Last day of the statement period, YYYY-MM-DD",
-        "beginning_balance": "Opening balance, digits only",
-        "ending_balance": "Closing balance, digits only",
-        "total_deposits": "Total deposits or credits for the period, digits only",
-        "total_withdrawals": "Total withdrawals or debits for the period, digits only"
+        "beginning_balance": "Opening balance, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "ending_balance": "Closing balance, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "total_deposits": "Total deposits or credits for the period, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "total_withdrawals": "Total withdrawals or debits for the period, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas"
       }
     },
     {
@@ -117,7 +121,9 @@
         "state": "Two letter state code",
         "zip": "Five digit ZIP code",
         "issue_date": "Issue date, YYYY-MM-DD",
-        "expiry_date": "Expiry date, YYYY-MM-DD"
+        "expiry_date": "Expiry date, YYYY-MM-DD",
+        "first_name": "Given/first name only when explicitly identifiable from a printed given-name label or a structured employee-name field. Do not guess by splitting an unlabelled full name. Null if unclear.",
+        "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear."
       }
     },
     {
@@ -138,10 +144,12 @@
       "regex_min_hits": 2,
       "extract": {
         "full_name": "Name exactly as printed on the card",
-        "ssn": "Social Security number, format 123-45-6789"
+        "ssn": "Social Security number, format 123-45-6789",
+        "first_name": "Given/first name only when explicitly identifiable from a printed given-name label or a structured employee-name field. Do not guess by splitting an unlabelled full name. Null if unclear.",
+        "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear."
       }
     }
   ],
   "classification_prompt": "You are a document classifier for a mortgage lender. Look at the page and decide what kind of document it is.\n\nThe only categories you may answer with are:\n{{TYPE_LIST}}\n\nRules you must follow:\n- Decide only from what is printed on the page. You are given no filename and no hint about what the document is supposed to be.\n- If the page does not clearly match one of the categories, answer \"unknown\". Do not guess the closest one.\n- If you cannot read enough of the page to tell, set readable to false.\n- evidence must be short phrases copied exactly from the page that support your answer. Do not invent them.\n- Answer with one JSON object and nothing else. No explanation, no markdown fence.\n\nAnswer in exactly this shape:\n{\"document_type\": \"<one category id or unknown>\", \"readable\": true, \"evidence\": [\"<exact phrase from the page>\"], \"mixed_document\": false}",
-  "extraction_prompt": "You are reading a {{DISPLAY_NAME}} for a mortgage lender and pulling out specific fields.\n\nExtract exactly these fields:\n{{FIELD_LIST}}\n\nRules you must follow:\n- Copy values from the document. Never infer, complete or calculate a value that is not printed.\n- If a field is not on the page, set its value to null. A missing value must stay missing.\n- For every field you do return, give the exact line of text you read it from, and the page number.\n- Amounts are digits only, with no currency symbol and no thousands separator.\n- Dates are YYYY-MM-DD.\n- Answer with one JSON object and nothing else. No explanation, no markdown fence.\n\nAnswer in exactly this shape:\n{\"fields\": {\"<field_name>\": {\"value\": \"<value or null>\", \"page\": 1, \"quote\": \"<exact line from the document>\"}}}"
+  "extraction_prompt": "You are reading a {{DISPLAY_NAME}} for a mortgage lender and pulling out specific fields.\n\nExtract exactly these fields:\n{{FIELD_LIST}}\n\nRules you must follow:\n- Copy values from the document. Never infer, complete or calculate a value that is not printed.\n- If a field is not on the page, set its value to null. A missing value must stay missing.\n- For every field you do return, give the exact line of text you read it from, and the page number.\n- Amounts are numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas, with no currency symbol and no thousands separator.\n- Dates are YYYY-MM-DD.\n- Answer with one JSON object and nothing else. No explanation, no markdown fence.\n\nAnswer in exactly this shape:\n{\"fields\": {\"<field_name>\": {\"value\": \"<value or null>\", \"page\": 1, \"quote\": \"<exact line from the document>\"}}}"
 }

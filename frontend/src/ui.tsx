@@ -149,15 +149,10 @@ export function Field(props: FieldProps) {
   const [editingSensitive, setEditingSensitive] = useState(false);
 
   return (
-    <div className="f">
+    <div className="f" data-field={name}>
       <label className="cap" htmlFor={id}>
         {spec.label}{spec.required && <span className="req">*</span>}
-        {provenance && (
-          <button type="button" className="aibadge"
-                  onClick={() => props.onOpenSource?.(provenance.fileId)}>
-            <Icon name="spark" />From your document
-          </button>
-        )}
+
       </label>
 
       {spec.sensitive ? (
@@ -205,8 +200,8 @@ export function Field(props: FieldProps) {
       {provenance && (
         <p className="srcline">
           <Icon name="file" />
-          <span>Read from <b>{provenance.fileName}</b>{provenance.page ? `, page ${provenance.page}` : ""}.</span>
-          <button className="linkish" onClick={() => props.onOpenSource?.(provenance.fileId)}>See it</button>
+          <span title={provenance.fileName}>{provenance.fileName}{provenance.page ? ` · Page ${provenance.page}` : ""}</span>
+          <button type="button" className="linkish" onClick={() => props.onOpenSource?.(provenance.fileId)}>View source</button>
         </p>
       )}
       {error && <p className="err"><Icon name="alert" /><span>{error}</span></p>}

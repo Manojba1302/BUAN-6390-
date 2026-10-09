@@ -37,6 +37,7 @@ export function FormStep(props: StepProps) {
       {focused && <>
         <div className="journey-start"><div><b>{props.values.firstName ? `Welcome, ${props.values.firstName}.` : "Choose your starting point"}</b><p>Answer a few questions, or upload your documents first and review any suggested answers.</p></div><button className="btn sec" onClick={() => props.onGo(1)}><Icon name="upload" />Start with documents</button></div>
       </>}
+      {step.groups.some(g => g.fields?.some(n => props.provenance[n])) && <div className="prefill-notice"><Icon name="spark" /><div><b>A head start from your documents</b><p>Review the suggested details below. You can edit any answer or open its source.</p></div></div>}
       {step.groups.map((group, i) => (
         <Group key={`${step.id}-${i}`} group={group} {...props} />
       ))}
@@ -77,7 +78,7 @@ function Group(props: StepProps & { group: GroupSpec }) {
       ))}
 
       {plain.length > 0 && (
-        <div className="grid g2">
+        <div className={`grid g2 ${names.includes("addr1") ? "address-grid" : ""}`}>
           {plain.map((name) => (
             <Field key={name} name={name} spec={dictionary.fields[name]}
                    value={values[name] ?? ""} error={errors[name]}

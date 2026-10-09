@@ -10,6 +10,7 @@ import logging
 import re
 from datetime import datetime
 
+import money_values
 import doc_types
 import ollama
 import pages
@@ -141,7 +142,7 @@ def extract(document: dict, document_tag: str) -> dict[str, dict]:
                 continue                      # a missing value stays missing
             out[name] = {
                 "value": value,
-                "normalized": _normalise(name, value),
+                "normalized": money_values.amount(name, value, str(payload.get("quote") or "") if isinstance(payload,dict) else "") or _normalise(name, value),
                 "page": index,
                 "quote": str(payload.get("quote") or "")[:500] if isinstance(payload, dict) else "",
                 "method": "vision" if images else page.get("method", "native_text"),

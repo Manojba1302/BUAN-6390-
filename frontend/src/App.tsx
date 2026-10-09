@@ -92,19 +92,19 @@ export function App() {
     const [state, prog, docs, vaultDocs] = await Promise.all([
       api.getApplication(id), api.progress(id), api.documents(id), api.documents(),
     ]);
-    if (!dirty.current) applyState(state);
+    if (!dirty.current) applyState(state, docs);
     setProgress(prog);
     setDocuments(docs);setVaultDocuments(vaultDocs);
   }, []);
 
-  function applyState(state: ApplicationState) {
+  function applyState(state: ApplicationState, sourceDocs: DocumentSummary[] = documents) {
     setCustomerId(state.customer_id ?? null);
     const next: Record<string, string> = {};
     const prov: Record<string, Provenance> = {};
     for (const [name, field] of Object.entries(state.fields)) {
       next[name] = field.value ?? "";
       if (field.review_state === "proposed" && field.file_id) {
-        prov[name] = { fileName: "your document", page: field.page, fileId: field.file_id };
+        prov[name] = { fileName: sourceDocs.find(d => d.file_id === field.file_id)?.display_name ?? "Document", page: field.page, fileId: field.file_id };
       }
     }
     setValues(next);
