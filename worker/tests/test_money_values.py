@@ -1,6 +1,16 @@
 import unittest
 from money_values import amount
+from unittest.mock import patch
+from worker import pipeline
 class MoneyTests(unittest.TestCase):
+    def test_extraction_preserves_quote_cents_after_refactor(self):
+        document = {"pages": [{"text": "W-2", "method": "native_text"}]}
+        answer = {"fields": {"box2_federal_tax": {"value": "226", "quote": "226.65"}}}
+        with patch.object(pipeline.ollama, "generate_json", return_value=answer):
+            fields = pipeline.extract(document, "w2")
+        self.assertEqual(fields["box2_federal_tax"]["normalized"], "226.65")
+        self.assertEqual(fields["box2_federal_tax"]["quote"], "226.65")
+
     def test_cents_preserved(self):
         self.assertEqual(amount("box1_wages","11,799.50"),"11799.50")
     def test_single_corresponding_quote_recovers_cents(self):

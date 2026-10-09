@@ -23,14 +23,7 @@ def publish_extraction_job(
     document_tag: str, trace_id: str,
 ) -> None:
     """Durable publish. A failure here leaves the file queued for retry."""
-    body = json.dumps({
-        "customer_id": str(customer_id),
-        "application_id": str(application_id) if application_id else None,
-        "file_id": str(file_id),
-        "document_tag": document_tag,
-        "trace_id": trace_id,
-    }).encode()
-
+    body = _message_body(customer_id, application_id, file_id, document_tag, trace_id)
     conn = _connection()
     try:
         channel = conn.channel()
@@ -44,3 +37,14 @@ def publish_extraction_job(
         log.info("queued file %s (%s)", file_id, document_tag)
     finally:
         conn.close()
+
+
+def _message_body(customer_id: UUID, application_id: UUID | None, file_id: UUID,
+                  document_tag: str, trace_id: str) -> bytes:
+    return json.dumps({
+        "customer_id": str(customer_id),
+        "application_id": str(application_id) if application_id else None,
+        "file_id": str(file_id),
+        "document_tag": document_tag,
+        "trace_id": trace_id,
+    }).encode()

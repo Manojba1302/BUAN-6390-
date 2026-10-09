@@ -1,6 +1,7 @@
 """The application itself: create, load, save, progress, prefill, submit."""
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -130,34 +131,35 @@ def _replace_repeatable(db: Session, app: Application, model, rows: list[dict]) 
 
 
 def _serialise(db: Session, app: Application) -> dict:
-    fields = db.scalars(select(ApplicationField)
-                        .where(ApplicationField.application_id == app.application_id)).all()
-    return {
+    out = {
         "application_id": str(app.application_id),
         "customer_id": str(app.customer_id),
         "status": app.status,
         "current_step": app.current_step,
-        "fields": {
-            f.field_name: {
-                "value": f.value,
-                "source": f.source,
-                "review_state": f.review_state,
-                "file_id": str(f.file_id) if f.file_id else None,
-                "page": f.page,
-                "evidence_quote": f.evidence_quote,
-                "method": f.method,
-            } for f in fields
-        },
+        "fields": _serialise_fields(db, app),
         "declarations": {
             d.code: d.answer for d in db.scalars(
                 select(Declaration).where(Declaration.application_id == app.application_id))
         },
-        "employment": [_row(e) for e in db.scalars(
-            select(Employment).where(Employment.application_id == app.application_id))],
-        "asset": [_row(a) for a in db.scalars(
-            select(Asset).where(Asset.application_id == app.application_id))],
-        "liability": [_row(l) for l in db.scalars(
-            select(Liability).where(Liability.application_id == app.application_id))],
+    }
+    for name, model in REPEATABLE_MODELS.items():      # employment, asset, liability
+        out[name] = [_row(r) for r in db.scalars(select(model).where(model.application_id == app.application_id))]
+    return out
+
+
+def _serialise_fields(db: Session, app: Application) -> dict:
+    fields = db.scalars(select(ApplicationField)
+                        .where(ApplicationField.application_id == app.application_id)).all()
+    return {
+        f.field_name: {
+            "value": f.value,
+            "source": f.source,
+            "review_state": f.review_state,
+            "file_id": str(f.file_id) if f.file_id else None,
+            "page": f.page,
+            "evidence_quote": f.evidence_quote,
+            "method": f.method,
+        } for f in fields
     }
 
 
@@ -175,67 +177,92 @@ def progress(application_id: UUID, db: Session = Depends(get_db),
     """What the tracker draws: per step, what is still missing."""
     app = _owned(db, application_id, customer)
     data = _serialise(db, app)
-    dictionary = _dictionary()
     values = {k: v["value"] for k, v in data["fields"].items()}
-
-    steps = []
-    for step in dictionary["steps"]:
-        missing = [
-            name for name, spec in dictionary["fields"].items()
-            if spec.get("step") == step["id"] and spec.get("required")
-            and (not spec.get("visible_if") or values.get(spec["visible_if"]["field"]) == spec["visible_if"]["equals"])
-            and not (values.get(name) or "").strip()
-        ]
-        if step["id"] == "documents":
-            missing += [c["display_name"] for c in _missing_documents(db, app)]
-        if step["id"] == "review":
-            answered = set(data["declarations"])
-            missing += [f"Declaration {d['code']}" for d in dictionary["declarations"]
-                        if d["code"] not in answered]
-        if step["id"] == "money" and values.get("employmentStatus") == "Employed" and not data["employment"]:
-            missing.append("At least one employer")
-        if step["id"] == "money":
-            missing += _income_errors(values, data["employment"])
-        steps.append({"id": step["id"], "label": step["label"],
-                      "complete": not missing, "missing": missing})
-
+    steps = [_step_status(db, app, step, data, values) for step in _dictionary()["steps"]]
     total = sum(len(s["missing"]) for s in steps)
     return {"steps": steps, "complete": total == 0,
             "percent": _percent(steps), "status": app.status}
 
 
+def _step_status(db: Session, app: Application, step: dict, data: dict, values: dict) -> dict:
+    missing = _missing_fields(step["id"], values) + _step_extras(db, app, step["id"], data, values)
+    return {"id": step["id"], "label": step["label"], "complete": not missing, "missing": missing}
+
+
+def _missing_fields(step_id: str, values: dict) -> list[str]:
+    """Required fields on this step that are visible and still empty."""
+    return [
+        name for name, spec in _dictionary()["fields"].items()
+        if spec.get("step") == step_id and spec.get("required")
+        and (not spec.get("visible_if") or values.get(spec["visible_if"]["field"]) == spec["visible_if"]["equals"])
+        and not (values.get(name) or "").strip()
+    ]
+
+
+def _step_extras(db: Session, app: Application, step_id: str, data: dict, values: dict) -> list[str]:
+    """Checks beyond single fields: documents, declarations, employers and income."""
+    if step_id == "documents":
+        return [c["display_name"] for c in _missing_documents(db, app)]
+    if step_id == "review":
+        answered = set(data["declarations"])
+        return [f"Declaration {d['code']}" for d in _dictionary()["declarations"] if d["code"] not in answered]
+    if step_id == "money":
+        extra = ["At least one employer"] if values.get("employmentStatus") == "Employed" and not data["employment"] else []
+        return extra + _income_errors(values, data["employment"])
+    return []
+
+
+INCOME_AMOUNT_FIELDS = ("selfEmploymentIncome", "pensionIncome", "socialSecurityIncome", "retirementIncome",
+                        "notEmployedIncome", "otherSituationIncome", "additionalIncomeAmount")
+REQUIRED_INCOME = {"Self-employed": ["selfEmploymentIncome"],
+                   "Retired": ["pensionIncome", "socialSecurityIncome", "retirementIncome"],
+                   "Not currently employed": ["notEmployedIncome"], "Other": ["otherSituationIncome"]}
+
+
 def _income_errors(values: dict, employment: list) -> list[str]:
-    errors = []
+    """Every income problem, in the order the customer sees them on the page."""
+    return _situation_errors(values) + _amount_errors(values) + _employment_errors(values, employment)
+
+
+def _situation_errors(values: dict) -> list[str]:
     if not values.get("employmentStatus"):
-        errors.append("Choose your employment situation in Get started")
-    if values.get("employmentStatus") == "Self-employed":
-        try:
-            if not 0 <= float(values.get("ownershipPercent", "")) <= 100:
-                errors.append("Ownership percentage must be between 0 and 100")
-        except ValueError:
-            errors.append("Enter a valid ownership percentage")
-    for name in ("selfEmploymentIncome", "pensionIncome", "socialSecurityIncome", "retirementIncome", "notEmployedIncome", "otherSituationIncome", "additionalIncomeAmount"):
+        return ["Choose your employment situation in Get started"]
+    if values.get("employmentStatus") != "Self-employed":
+        return []
+    try:
+        if not 0 <= float(values.get("ownershipPercent", "")) <= 100:
+            return ["Ownership percentage must be between 0 and 100"]
+    except ValueError:
+        return ["Enter a valid ownership percentage"]
+    return []
+
+
+def _amount_errors(values: dict) -> list[str]:
+    """Visible income amounts must be valid, non-negative numbers."""
+    errors = []
+    for name in INCOME_AMOUNT_FIELDS:
         spec = _dictionary()["fields"][name]
         condition = spec.get("visible_if")
-        if condition and values.get(condition["field"]) != condition["equals"]:
+        if (condition and values.get(condition["field"]) != condition["equals"]) or not values.get(name):
             continue
-        if values.get(name):
-            try:
-                amount = float(values[name].replace(",", "").replace("$", ""))
-                if not __import__("math").isfinite(amount) or amount < 0:
-                    errors.append(spec["label"] + " must be a nonnegative amount")
-            except ValueError:
-                errors.append("Enter a valid " + spec["label"].lower())
-    if values.get("employmentStatus") == "Employed":
-        if any(not (row.get("employer_name") or "").strip() for row in employment):
-            errors.append("Employer name")
+        try:
+            amount = float(values[name].replace(",", "").replace("$", ""))
+            if not math.isfinite(amount) or amount < 0:
+                errors.append(spec["label"] + " must be a nonnegative amount")
+        except ValueError:
+            errors.append("Enter a valid " + spec["label"].lower())
+    return errors
+
+
+def _employment_errors(values: dict, employment: list) -> list[str]:
     status = values.get("employmentStatus")
-    required_income = {"Self-employed":["selfEmploymentIncome"], "Retired":["pensionIncome","socialSecurityIncome","retirementIncome"], "Not currently employed":["notEmployedIncome"], "Other":["otherSituationIncome"]}
-    if status in required_income and not any(str(values.get(name) or "").strip() for name in required_income[status]):
+    errors = []
+    if status == "Employed" and any(not (row.get("employer_name") or "").strip() for row in employment):
+        errors.append("Employer name")
+    if status in REQUIRED_INCOME and not any(str(values.get(n) or "").strip() for n in REQUIRED_INCOME[status]):
         errors.append("Enter monthly income, or 0 if none")
-    if status == "Employed" and employment:
-        if any(not row.get("base") for row in employment):
-            errors.append("Base monthly employment income")
+    if status == "Employed" and employment and any(not row.get("base") for row in employment):
+        errors.append("Base monthly employment income")
     return errors
 
 
