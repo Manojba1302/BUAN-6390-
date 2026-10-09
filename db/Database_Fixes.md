@@ -47,7 +47,7 @@ the documents that supplied their information.
 
 The database checks that:
 
-- The source file exists.
+- The source file exists when a source-file link is provided.
 - The detail record belongs to the customer who owns its application.
 - The source file belongs to that same customer.
 
@@ -91,6 +91,10 @@ The database rules ensure that:
 
 The application is responsible for enforcing session expiry,
 reset-token validity, and account-lockout behaviour.
+
+The authentication models in `backend/app/db/models.py` were updated
+to include the customer-deletion rules, database defaults, and
+nonnegative failed-attempts check.
 
 ## 5. Applying the Changes
 
@@ -185,6 +189,18 @@ On October 7, 2026:
   database before applying `009`.
 - An existing user successfully logged in after the update.
 
+### Setup and model checks — October 9, 2026
+
+- A separate empty database initialized successfully using
+  `001_schema.sql` and scripts `003` through `008`.
+- PostgreSQL completed initialization without reported errors.
+- The three login models loaded successfully with the expected
+  customer-deletion rules, database defaults, and nonnegative
+  failed-attempts check.
+
+These model checks inspected the Python definitions without changing
+database records. They did not test the complete authentication workflow.
+
 ## 7. Test Files
 
 The following files are stored in `db/tests`:
@@ -223,8 +239,6 @@ is fully tested.
 
 Remaining work includes:
 
-- Confirming fresh database initialization through script `008`.
-- Checking that the authentication models match the updated SQL rules.
 - Testing password reset, session expiry, and account lockout.
 - Testing customer access restrictions through authenticated API requests.
 - Validating AI-generated answers and extraction accuracy across
