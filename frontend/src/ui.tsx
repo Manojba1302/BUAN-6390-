@@ -109,8 +109,9 @@ export function Rail({ dictionary, progress, step, applicationId, onGo }: {
 }
 
 /* ------------------------------------------------------------------ footer */
-export function FootNav({ step, lastStep, blocking, busy, onBack, onNext }: {
+export function FootNav({ step, lastStep, blocking, busy, unsaved, justSaved, saveError, onBack, onNext }: {
   step: number; lastStep: boolean; blocking: string | null; busy: boolean;
+  unsaved: boolean; justSaved: boolean; saveError: string;
   onBack: () => void; onNext: () => void;
 }) {
   return (
@@ -119,9 +120,12 @@ export function FootNav({ step, lastStep, blocking, busy, onBack, onNext }: {
         {step > 0 && (
           <button className="btn sec" onClick={onBack}><Icon name="back" />Back</button>
         )}
-        <span className="footnote">{blocking || "Select Save and continue to save your answers."}</span>
+        <div className="footnote"><span className="foot-step">Step {step + 1} of 6</span><span className={blocking ? "foot-status needs-input" : "foot-status"}>{blocking || "Your progress is saved when you continue"}</span></div>
+        <div className="save-feedback" aria-live="polite">
+          {saveError ? <span className="save-feedback-error" role="alert"><Icon name="alert" />{saveError}</span> : busy ? <span><span className="spin" />Saving…</span> : unsaved ? <span className="save-feedback-unsaved">You have unsaved changes.</span> : justSaved ? <span className="save-feedback-success"><Icon name="check" />Progress saved</span> : null}
+        </div>
         <button className="btn" onClick={onNext} disabled={busy}>
-          {busy ? "Saving" : lastStep ? "Submit application" : "Save and continue"}
+          {busy ? "Saving…" : saveError ? "Retry save" : lastStep ? "Submit application" : "Save and continue"}
           {!lastStep && !busy && <Icon name="chevron" />}
         </button>
       </div>

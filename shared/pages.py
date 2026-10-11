@@ -34,7 +34,8 @@ def native_text(body: bytes) -> list[str]:
     try:
         import fitz
         with fitz.open(stream=body, filetype="pdf") as doc:
-            return [p.get_text("text") or "" for p in doc]
+            from pay_evidence import aligned_labels
+            return [(p.get_text("text") or "") + "\n" + aligned_labels(p) for p in doc]
     except Exception as exc:
         log.warning("native text failed: %s", exc)
         return []

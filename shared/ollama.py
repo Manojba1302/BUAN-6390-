@@ -24,7 +24,7 @@ class OllamaError(RuntimeError):
 
 def generate_json(
     *, model: str, prompt: str, images: list[bytes] | None = None,
-    timeout: float = 60.0, temperature: float = 0.0,
+    timeout: float = 60.0, temperature: float = 0.0, options: dict | None = None, response_schema: dict | None = None,
 ) -> dict:
     """Ask the model for one JSON object and parse it.
 
@@ -35,8 +35,8 @@ def generate_json(
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "format": "json",
-        "options": {"temperature": temperature},
+        "format": response_schema or "json",
+        "options": {"temperature": temperature, **(options or {})},
     }
     if images:
         payload["images"] = [base64.b64encode(i).decode() for i in images]

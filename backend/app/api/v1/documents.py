@@ -20,7 +20,7 @@ from app.db.models import (
     Application, ApplicationField, Asset, Employment, Customer, DocumentMarkdown, Extraction, File, FileClassification,
 )
 from app.db.session import get_db
-from app.services import audit, classifier, queue, storage
+from app.services import audit, classifier, queue, storage, saved_document_evidence
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -143,6 +143,7 @@ def list_documents(application_id: UUID | None = None, document_tag: str | None 
 def get_document(file_id: UUID, db: Session = Depends(get_db),
                  customer: Customer = Depends(current_customer)) -> dict:
     row = _owned_file(db, file_id, customer)
+    saved_document_evidence.recover(db, row)
     detail = _summary(db, row)
     detail["extractions"] = [{
         "extraction_id": str(e.extraction_id), "field_name": e.field_name,
@@ -162,7 +163,7 @@ def _missing_fields(document_tag: str, found: list[dict]) -> list[str]:
         return []
     have = {e["field_name"] for e in found if e["value"]}
     full_name_found = bool(have & {"full_name", "employee_name", "name"})
-    return [name for name in spec["extract"] if name not in have and not (full_name_found and name in ("first_name", "last_name"))]
+    return [name for name in spec["extract"] if name not in have and name not in spec.get("optional_extract", []) and not (full_name_found and name in ("first_name", "last_name"))]
 
 
 @router.get("/{file_id}/content")

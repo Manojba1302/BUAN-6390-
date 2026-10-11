@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, auth, ApiError } from "./api";
 import { AuthPage } from "./AuthPage";
 import type { CustomerProfile } from "./api";
+import { DocumentChat } from "./DocumentChat";
 import { DocDrawer } from "./DocDrawer";
 import { DocCard, DocumentsStep } from "./Documents";
 import { validate } from "./format";
@@ -11,7 +12,7 @@ import { Icon } from "./icons";
 import { FormStep, type Provenance } from "./Steps";
 import { FootNav, Rail, useToast } from "./ui";
 import type {
-  ApplicationState, ChecklistItem, Dictionary, DocumentSummary, Progress,
+  ApplicationState, ChecklistItem, Dictionary, DocumentSummary, Progress, NameSuggestion, AddressSuggestion, EmploymentSuggestion,
 } from "./types";
 
 type Rows = Record<string, Record<string, unknown>[]>;
@@ -22,6 +23,9 @@ export function App() {
   const [appId, setAppId] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [employmentSuggestions, setEmploymentSuggestions] = useState<EmploymentSuggestion[]>([]);
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [nameSuggestions, setNameSuggestions] = useState<NameSuggestion[]>([]);
   const [provenance, setProvenance] = useState<Record<string, Provenance>>({});
   const [declarations, setDeclarations] = useState<Record<string, string>>({});
   const [rows, setRows] = useState<Rows>({ employment: [], asset: [], liability: [] });
@@ -33,12 +37,13 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [openDoc, setOpenDoc] = useState<string | null>(null);
   const [vaultOpen, setVaultOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [user, setUser] = useState<CustomerProfile | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const email = user?.email || "";
   useEffect(() => {
-    const expired = () => { setUser(null); setAppId(null); setDictionary(null); setValues({}); setDocuments([]); setProvenance({}); setDeclarations({}); setRows({employment:[],asset:[],liability:[]}); setCustomerId(null); setProgress(null); dirty.current = false; setUnsaved(false); };
+    const expired = () => { setUser(null); setAppId(null); setDictionary(null); setValues({}); setDocuments([]); setNameSuggestions([]); setAddressSuggestions([]); setEmploymentSuggestions([]); setProvenance({}); setDeclarations({}); setRows({employment:[],asset:[],liability:[]}); setCustomerId(null); setProgress(null); dirty.current = false; setUnsaved(false); };
     window.addEventListener("homeflow:session-expired", expired);
     if (location.hash.startsWith("#reset=")) setAuthChecked(true);
     else void auth.me().then(setUser).catch(() => setUser(null)).finally(() => setAuthChecked(true));
@@ -68,7 +73,14 @@ export function App() {
   }, []);
   const dirty = useRef(false);
   const [unsaved, setUnsaved] = useState(false);
-  function markDirty() { dirty.current = true; setUnsaved(true); }
+  const [saveError, setSaveError] = useState("");
+  const [justSaved, setJustSaved] = useState(false);
+  useEffect(() => {
+    if (!justSaved) return;
+    const timer = window.setTimeout(() => setJustSaved(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [justSaved]);
+  function markDirty() { dirty.current = true; setUnsaved(true); setJustSaved(false); }
 
   /* ---------------------------------------------------------- bootstrap */
   useEffect(() => {
@@ -92,6 +104,9 @@ export function App() {
     const [state, prog, docs, vaultDocs] = await Promise.all([
       api.getApplication(id), api.progress(id), api.documents(id), api.documents(),
     ]);
+    setNameSuggestions(state.name_suggestions ?? []);
+    setAddressSuggestions(state.address_suggestions ?? []);
+    setEmploymentSuggestions(state.employment_suggestions ?? []);
     if (!dirty.current) applyState(state, docs);
     setProgress(prog);
     setDocuments(docs);setVaultDocuments(vaultDocs);
@@ -147,17 +162,18 @@ export function App() {
 
   async function save(): Promise<boolean> {
     if (!appId) return false;
-    setBusy(true);
+    setBusy(true); setSaveError(""); setJustSaved(false);
     try {
       await api.patchApplication(appId, {
         fields: values, declarations, current_step: step,
         employment: rows.employment, asset: rows.asset, liability: rows.liability,
       });
-      dirty.current = false; setUnsaved(false);
-      setProgress(await api.progress(appId));
+      dirty.current = false; setUnsaved(false); setJustSaved(true);
+      try { setProgress(await api.progress(appId)); } catch { /* Answers were saved; progress can refresh later. */ }
       return true;
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : "We could not save your changes.");
+      const message = err instanceof ApiError ? err.message : "We could not save your changes.";
+      setSaveError(message); toast(message);
       return false;
     } finally {
       setBusy(false);
@@ -263,9 +279,6 @@ export function App() {
             <span>HomeFlow<small>Your path home</small></span>
           </div>
           <div className="spacer" />
-          <div className="savestate">
-            {busy ? <span className="spin" /> : <span className="dot" />} {busy ? "Saving" : unsaved ? "Unsaved changes" : "Saved"}
-          </div>
           <button className="ghost" onClick={async () => { if (dirty.current && !(await save())) return; setVaultOpen((v) => !v); }}>
             <Icon name="folder" /><span>{vaultOpen ? "Back to application" : "My vault"}</span>
           </button>
@@ -278,15 +291,19 @@ export function App() {
             </section>
           </details>
           <details className="header-menu profile-menu" ref={profileMenu} onToggle={e => { if (e.currentTarget.open && notificationMenu.current) notificationMenu.current.open = false; }}>
-            <summary aria-label="Your profile"><span className="avatar">{(values.firstName || email || "H").slice(0, 2).toUpperCase()}</span></summary>
+            <summary aria-label="Your profile"><span className="avatar">{(user.first_name || email || "H").slice(0, 2).toUpperCase()}</span></summary>
             <section className="header-popover" aria-label="Your profile">
-              <h2>Your profile</h2>
-              <p className="profile-name">{[user.first_name, user.last_name].filter(Boolean).join(" ") || "Name not entered yet"}</p>
-              <p className="profile-email">{email}</p>
-              <small>Customer ID</small><p className="profile-reference">{customerId || user.customer_id}</p>
-              <button className="profile-action" onClick={e => { e.currentTarget.closest("details")?.removeAttribute("open"); void goTo(2); }}>Personal information</button>
-              <button className="profile-action" onClick={async e => { const menu = e.currentTarget.closest("details"); if (dirty.current && !(await save())) return; setVaultOpen(true); menu?.removeAttribute("open"); }}>My vault</button>
-              <button className="profile-action logout" onClick={async () => { if (dirty.current && !(await save())) return; try { await auth.logout(); window.location.reload(); } catch { toast("Could not log out. Please try again."); } }}>Log out</button>
+              <details className="profile-overview">
+                <summary><span className="profile-symbol"><Icon name="user" /></span><span><small>Your account</small><strong>Your profile</strong></span><Icon name="chevron" /></summary>
+                <div className="profile-details">
+                  <p className="profile-name">{[user.first_name, user.last_name].filter(Boolean).join(" ") || "Name not entered yet"}</p>
+                  <p className="profile-email">{email}</p>
+                  <div className="profile-account-reference"><small>Account reference</small><p className="profile-reference">{customerId || user.customer_id}</p></div>
+                </div>
+              </details>
+              <button className="profile-action" onClick={e => { e.currentTarget.closest("details")?.removeAttribute("open"); void goTo(2); }}><Icon name="user" /><span>Personal information</span><Icon name="chevron" /></button>
+              <button className="profile-action" onClick={async e => { const menu = e.currentTarget.closest("details"); if (dirty.current && !(await save())) return; setVaultOpen(true); menu?.removeAttribute("open"); }}><Icon name="folder" /><span>My vault</span><Icon name="chevron" /></button>
+              <button className="profile-action logout" onClick={async () => { if (dirty.current && !(await save())) return; try { await auth.logout(); window.location.reload(); } catch { toast("Could not log out. Please try again."); } }}><Icon name="logout" /><span>Log out</span></button>
             </section>
           </details>
         </div>
@@ -305,19 +322,35 @@ export function App() {
           ) : (
             <FormStep dictionary={dictionary} step={stepSpec} values={values} errors={errors}
                       provenance={provenance} declarations={declarations} rows={rows}
+                      employmentSuggestions={employmentSuggestions}
+                      addressSuggestions={addressSuggestions} onChooseAddress={candidate => {
+                        setValue("addr1", candidate.address); setValue("city", candidate.city);
+                        setValue("state", candidate.state); setValue("zip", candidate.zip);
+                        toast("Address selected. Review it and save to confirm your current residence.");
+                      }}
+                      accountName={[user.first_name, user.last_name].filter(Boolean).join(" ")}
+                      nameSuggestions={nameSuggestions} onChooseName={candidate => {
+                        setValue("firstName", candidate.first_name);
+                        setValue("lastName", candidate.last_name);
+                        setValue("legalName", candidate.full_name || candidate.label);
+                        toast("Name selected. Save and continue to confirm it. Review other document details too.");
+                      }}
                       progress={progress} onGo={goTo}
                       onChange={setValue} onBlur={blurField}
                       onDeclaration={(code, answer) => { markDirty(); setDeclarations((d) => ({ ...d, [code]: answer })); }}
                       onRows={(kind, next) => { markDirty(); setRows((r) => ({ ...r, [kind]: next })); }}
                       onOpenSource={setOpenDoc} />
           )}
+          {!vaultOpen && <FootNav step={step} lastStep={step === dictionary.steps.length - 1}
+               blocking={blocking} busy={busy} unsaved={unsaved} justSaved={justSaved} saveError={saveError}
+               onBack={() => goTo(Math.max(0, step - 1))} onNext={() => void next()} />}
         </main>
       </div>
 
-      {!vaultOpen && <FootNav step={step} lastStep={step === dictionary.steps.length - 1}
-               blocking={blocking} busy={busy}
-               onBack={() => goTo(Math.max(0, step - 1))} onNext={() => void next()} />}
 
+
+      {!chatOpen && !openDoc && <button className="assistant-launcher" type="button" aria-label="Ask HomeFlow about your documents" onClick={() => setChatOpen(true)}><Icon name="chat" /><span className="assistant-launcher-label">Ask HomeFlow</span></button>}
+      {chatOpen && <DocumentChat key={appId} applicationId={appId} onClose={() => setChatOpen(false)} onOpenSource={setOpenDoc} />}
       <DocDrawer fileId={openDoc} onClose={() => setOpenDoc(null)}
                  onSaved={() => void load(appId)} />
     </div>

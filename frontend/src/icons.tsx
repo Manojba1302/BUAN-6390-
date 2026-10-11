@@ -2,6 +2,10 @@
 import type { JSX } from "react";
 
 const PATHS: Record<string, JSX.Element> = {
+  logout: <><path d="M9 4H4v16h5" /><path d="M9 12h12m-4-4 4 4-4 4" /></>,
+  send: <><path d="M12 19V5" /><path d="m6 11 6-6 6 6" /></>,
+  history: <><path d="M3 11a9 9 0 1 1 2.6 7" /><path d="M3 4v7h7" /><path d="M12 7v5l3 2" /></>,
+  more: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
   bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
   homeflow: <><path d="M3 11 12 3l9 8" /><path d="M5 10v10h5" /><path d="M19 10v10h-3" /><path d="M12 12v3c0 3 3 3 3 6" /><path d="M9 12h6" /></>,
   check: <path d="M20 6 9 17l-5-5" />,

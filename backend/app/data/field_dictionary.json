@@ -225,7 +225,7 @@
     {
       "id": "start",
       "label": "Get started",
-      "title": "Let’s make your next move happen.",
+      "title": "Let\u2019s make your next move happen.",
       "lede": "Start with your plans and a few details about you. You can move between sections as you gather the information you need.",
       "groups": [
         {
@@ -341,7 +341,7 @@
       "id": "money",
       "label": "Income & finances",
       "title": "Your work. Your income. Your future.",
-      "lede": "Everyone’s income looks different. Choose your current situation and we’ll show the details that apply to you. You can include other income you want considered.",
+      "lede": "Everyone\u2019s income looks different. Choose your current situation and we\u2019ll show the details that apply to you. You can include other income you want considered.",
       "groups": [
         {
           "title": "Which situation describes you?",
@@ -898,7 +898,7 @@
       "label": "Employer",
       "add_label": "Add your employer",
       "add_another_label": "Add another employer",
-      "hint": "If you have been in this job under two years, add the one before it as well.",
+      "hint": "Enter monthly income amounts, not a single pay period total. Mark previous jobs as employment history; their income is excluded from the current total. If you have been in this job under two years, add the one before it as well.",
       "fields": [
         {
           "id": "employer_name",
@@ -923,12 +923,12 @@
         },
         {
           "id": "overtime",
-          "label": "Overtime",
+          "label": "Monthly overtime income",
           "widget": "currency"
         },
         {
           "id": "bonuses",
-          "label": "Bonuses",
+          "label": "Monthly bonus income",
           "widget": "currency"
         },
         {

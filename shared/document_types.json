@@ -31,8 +31,30 @@
         "net_pay": "Net pay for this period, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
         "ytd_gross": "Year-to-date gross earnings, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
         "first_name": "Given/first name only when explicitly identifiable from a printed given-name label or a structured employee-name field. Do not guess by splitting an unlabelled full name. Null if unclear.",
-        "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear."
-      }
+        "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear.",
+        "address": "The employee's mailing street address including unit, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "city": "The employee's mailing city, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "state": "The employee's mailing state, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "zip": "The employee's mailing ZIP code, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "position": "Exact printed Job Title or Position, e.g. Student Assistant. Null if absent.",
+        "pay_rate": "Explicit printed contractual Pay Rate, preserving cents. Do not use gross pay, net pay, YTD or regular earnings totals.",
+        "pay_rate_basis": "Basis explicitly attached to Pay Rate: hourly, weekly, biweekly, semimonthly, monthly or annual. Do not borrow the pay-period frequency for an hourly rate. Null if unclear.",
+        "regular_pay": "Current-period regular earnings only, excluding overtime, extra hours, retroactive pay, bonuses and other earnings. This is not necessarily the contractual base rate.",
+        "overtime_pay": "Explicit current-period overtime earnings amount, only if separately labelled.",
+        "bonus_pay": "Explicit current-period bonus amount, only if separately labelled.",
+        "total_deductions": "Explicit current-period total deductions, preserving cents. Never use year-to-date amounts and never infer this from gross minus net. Null if not printed.",
+        "federal_withholding": "Explicit current-period federal income tax withholding, preserving cents. Never use year-to-date amounts. Null if not separately printed."
+      },
+      "optional_extract": [
+        "regular_pay",
+        "overtime_pay",
+        "bonus_pay",
+        "position",
+        "pay_rate",
+        "pay_rate_basis",
+        "total_deductions",
+        "federal_withholding"
+      ]
     },
     {
       "id": "w2",
@@ -61,7 +83,11 @@
         "box1_wages": "Box 1 wages, tips, other compensation, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
         "box2_federal_tax": "Box 2 federal income tax withheld, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
         "first_name": "Given/first name only when explicitly identifiable from a printed given-name label or a structured employee-name field. Do not guess by splitting an unlabelled full name. Null if unclear.",
-        "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear."
+        "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear.",
+        "address": "The employee's mailing street address including unit, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "city": "The employee's mailing city, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "state": "The employee's mailing state, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "zip": "The employee's mailing ZIP code, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts."
       }
     },
     {
@@ -91,7 +117,11 @@
         "beginning_balance": "Opening balance, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
         "ending_balance": "Closing balance, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
         "total_deposits": "Total deposits or credits for the period, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
-        "total_withdrawals": "Total withdrawals or debits for the period, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas"
+        "total_withdrawals": "Total withdrawals or debits for the period, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
+        "address": "The account holder's mailing street address including unit, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "city": "The account holder's mailing city, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "state": "The account holder's mailing state, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "zip": "The account holder's mailing ZIP code, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts."
       }
     },
     {
@@ -148,6 +178,15 @@
         "first_name": "Given/first name only when explicitly identifiable from a printed given-name label or a structured employee-name field. Do not guess by splitting an unlabelled full name. Null if unclear.",
         "last_name": "Surname/family name only when explicitly identifiable from a printed surname label or a structured employee-name field. Preserve compound surnames. Do not guess by splitting an unlabelled full name. Null if unclear."
       }
+    },
+    {
+      "id": "other",
+      "display_name": "Other document",
+      "definition": "A readable document that does not match a defined category; no fixed extraction schema.",
+      "signals": [],
+      "regex": [],
+      "regex_min_hits": 99,
+      "extract": {}
     }
   ],
   "classification_prompt": "You are a document classifier for a mortgage lender. Look at the page and decide what kind of document it is.\n\nThe only categories you may answer with are:\n{{TYPE_LIST}}\n\nRules you must follow:\n- Decide only from what is printed on the page. You are given no filename and no hint about what the document is supposed to be.\n- If the page does not clearly match one of the categories, answer \"unknown\". Do not guess the closest one.\n- If you cannot read enough of the page to tell, set readable to false.\n- evidence must be short phrases copied exactly from the page that support your answer. Do not invent them.\n- Answer with one JSON object and nothing else. No explanation, no markdown fence.\n\nAnswer in exactly this shape:\n{\"document_type\": \"<one category id or unknown>\", \"readable\": true, \"evidence\": [\"<exact phrase from the page>\"], \"mixed_document\": false}",

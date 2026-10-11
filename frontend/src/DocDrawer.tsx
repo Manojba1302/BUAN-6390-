@@ -70,14 +70,14 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
         {doc && (
           <>
             <div className="dr-head">
-              <b id="drawerTitle">{doc.original_name}</b>
+              <span className="review-document-icon"><Icon name="doc" /></span><div className="review-document-title"><small>Document review</small><b id="drawerTitle">{doc.original_name}</b></div>
               {doc.classification && (
                 <span className={`chip ${doc.classification.outcome === "matched" ? "g" : "w"}`}>
                   <Icon name={doc.classification.outcome === "matched" ? "check" : "alert"} />
                   {doc.classification.outcome === "matched" ? "Type matched" : "Check this"}
                 </span>
               )}
-              <button className="xbtn" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+              <button className="panel-close" onClick={onClose} aria-label="Close document review" title="Close"><Icon name="x" /></button>
             </div>
 
             <div className="dr-body">
@@ -106,7 +106,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                   </div>
                 )}
 
-                <section className="document-person-review">
+                <section className="document-person-review" hidden={!(["drivers_license","w2","paystub","ssn_card"].includes(doc.document_tag) && (!doc.extractions.some(e=>e.field_name==="first_name") || !doc.extractions.some(e=>e.field_name==="last_name")))}>
                   {["drivers_license","w2","paystub","ssn_card"].includes(doc.document_tag) && (!doc.extractions.some(e=>e.field_name==="first_name") || !doc.extractions.some(e=>e.field_name==="last_name")) && <>
                     <h3>Confirm the name parts</h3>
                     <p className="hint">{doc.extractions.some(e=>["full_name","employee_name","name"].includes(e.field_name) && e.value) ? "A full name was found. Confirm its first and last name; we will not guess how to split it." : "Check the printed name before entering its parts."}</p>
@@ -123,7 +123,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                     <div className="fieldrow" key={row.extraction_id}>
                       <div className="fr-top">
                         <b>{fieldLabelFromName(row.field_name)}</b>
-                        <span className="chip n">{row.method === "native_text" ? "text" : row.method ?? "user entry"}</span>
+                        <span className="chip n">{row.method === "native_text" ? "text" : row.method ?? (row.evidence_quote ? "saved document text" : "user entry")}</span>
                         {row.review_state === "corrected" && <span className="chip a">corrected</span>}
                         {sensitive && (
                           <button className="xbtn" aria-label="Show value"
@@ -158,7 +158,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                   </div>
                 )}
 
-                <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div className="review-savebar">
                   <button className="btn" onClick={() => void save()} disabled={saving}>
                     {saving ? "Saving" : "Save corrections"}
                   </button>

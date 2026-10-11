@@ -1,9 +1,13 @@
 """Preserve decimal amounts, recovering cents only from one corroborating quote."""
 import re
 from decimal import Decimal, InvalidOperation
-MONEY_FIELDS = {"gross_pay","net_pay","ytd_gross","box1_wages","box2_federal_tax","beginning_balance","ending_balance","total_deposits","total_withdrawals"}
+MONEY_FIELDS = {"total_deductions","federal_withholding","pay_rate","regular_pay","overtime_pay","bonus_pay","gross_pay","net_pay","ytd_gross","box1_wages","box2_federal_tax","beginning_balance","ending_balance","total_deposits","total_withdrawals"}
 def amount(field, value, quote=""):
     if field not in MONEY_FIELDS: return None
+    if field == "total_withdrawals":
+        from bank_evidence import total_from_summary
+        verified = total_from_summary(quote)
+        if verified is not None: return verified
     clean = re.sub(r"[$,\s]", "", str(value))
     if not re.fullmatch(r"-?\d+(?:\.\d{1,2})?", clean): return None
     candidates = re.findall(r"(?<![\d.])-?\d[\d,]*\.\d{2}(?!\d)", quote)

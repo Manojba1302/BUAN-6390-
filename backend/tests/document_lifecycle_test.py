@@ -44,7 +44,7 @@ class DocumentLifecycleTests(unittest.TestCase):
             self.assertTrue(md.exists())
             self.assertEqual(client.post(f"/api/v1/documents/{file_id}/link", json={"application_id":str(application_id)}).status_code, 200)
             with SessionLocal() as db:
-                self.assertEqual(db.get(ApplicationField,(application_id,"city")).value,"Test City")
+                self.assertIsNone(db.get(ApplicationField,(application_id,"city")))
                 db.get(Application,application_id).status="submitted"; db.commit()
             self.assertEqual(client.delete(f"/api/v1/documents/{file_id}").status_code,409)
             self.assertEqual(client.delete(f"/api/v1/documents/{file_id}/permanent").status_code,409)

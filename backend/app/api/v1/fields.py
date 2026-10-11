@@ -45,4 +45,4 @@ def checklist(db: Session = Depends(get_db)) -> list[dict]:
             "guidance": r.guidance,
         }
         for r in rows
-    ]
+    ] + [{"document_tag": "other", "display_name": "Other document", "required_count": 0, "guidance": "Optional supporting document. Readable text is searchable in chat; no predefined fields are required."}]

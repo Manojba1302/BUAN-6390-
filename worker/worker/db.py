@@ -108,7 +108,7 @@ def replace_chunks(conn, file_id: str, customer_id: str, chunks: list[dict]) -> 
         """), {"file_id": file_id, "customer_id": customer_id,
                "idx": chunk["index"], "page": chunk["page"],
                "content": chunk["content"],
-               "embedding": "[" + ",".join(str(v) for v in chunk["embedding"]) + "]"})
+               "embedding": "[" + ",".join(str(v) for v in chunk["embedding"]) + "]" if chunk.get("embedding") else None})
 
 
 def audit(conn, action: str, *, customer_id: str | None = None,

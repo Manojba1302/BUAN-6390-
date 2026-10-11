@@ -6,6 +6,7 @@ Each test creates its own synthetic customer and removes it afterwards.
 Object storage, the queue and Ollama are replaced with fakes.
 """
 import os
+import json
 import tempfile
 import unittest
 import uuid
@@ -60,31 +61,32 @@ class DatabaseTests(unittest.TestCase):
 
     # ---------------------------------------------------------------- pre-fill
     def test_prefill_proposes_values_with_evidence(self):
-        self._file("drivers_license", full_name="Alex Morgan", city="Dallas")
+        self._file("drivers_license", full_name="Alex Morgan", date_of_birth="1990-01-01")
         self.assertEqual(prefill.apply_file(self.db, file=self.db.scalar(select(File).where(
-            File.application_id == self.app_row.application_id))), {"applied": 2, "skipped": 0})
-        field = self._field("legalName")
-        self.assertEqual((field.value, field.review_state, field.page), ("Alex Morgan", "proposed", 1))
+            File.application_id == self.app_row.application_id))), {"applied": 1, "skipped": 0})
+        field = self._field("dob")
+        self.assertEqual((field.value, field.review_state, field.page), ("1990-01-01", "proposed", 1))
+        self.assertIsNone(self._field("legalName"))
 
     def test_prefill_never_overwrites_a_confirmed_value(self):
-        self.db.add(ApplicationField(application_id=self.app_row.application_id, field_name="city",
-                                     value="Austin", source="user", review_state="confirmed"))
+        self.db.add(ApplicationField(application_id=self.app_row.application_id, field_name="dob",
+                                     value="1990-01-01", source="user", review_state="confirmed"))
         self.db.commit()
-        result = prefill.apply_file(self.db, file=self._file("drivers_license", city="Dallas"))
+        result = prefill.apply_file(self.db, file=self._file("drivers_license", date_of_birth="2000-01-01"))
         self.assertEqual(result, {"applied": 0, "skipped": 1})
-        self.assertEqual(self._field("city").value, "Austin")
+        self.assertEqual(self._field("dob").value, "1990-01-01")
 
-    def test_paystub_creates_employment_with_monthly_income(self):
-        prefill.apply_file(self.db, file=self._file("paystub", employer_name="Northwind", gross_pay="3000",
-                                                    pay_frequency="biweekly", position="Analyst"))
-        job = self.db.scalar(select(Employment).where(Employment.application_id == self.app_row.application_id))
-        self.assertEqual((job.employer_name, str(job.base), job.pay_frequency, job.position),
-                         ("Northwind", "6500.00", "biweekly", "Analyst"))
+    def test_documents_do_not_create_jobs_automatically(self):
+        for tag in ("paystub", "w2", "paystub"):
+            prefill.apply_file(self.db, file=self._file(tag, employer_name="Northwind",
+                               gross_pay="3000", pay_rate="3000", pay_rate_basis="biweekly"))
+        jobs = self.db.scalars(select(Employment).where(Employment.application_id == self.app_row.application_id)).all()
+        self.assertEqual(jobs, [])
 
-    def test_paystub_without_frequency_leaves_income_blank(self):
+    def test_paystub_without_frequency_leaves_jobs_for_customer_review(self):
         prefill.apply_file(self.db, file=self._file("paystub", employer_name="Northwind", gross_pay="3000"))
         job = self.db.scalar(select(Employment).where(Employment.application_id == self.app_row.application_id))
-        self.assertEqual((float(job.base or 0), job.pay_frequency), (0.0, None))
+        self.assertIsNone(job)
 
     def test_two_statements_for_one_account_are_one_asset_with_latest_balance(self):
         for end, bal in (("2026-08-31", "1000"), ("2026-09-30", "2500"), ("2026-07-31", "50")):
@@ -96,10 +98,10 @@ class DatabaseTests(unittest.TestCase):
 
     # ---------------------------------------------------------------- application API
     def test_get_application_serialises_fields_and_lists(self):
-        self._file("drivers_license", city="Dallas")
+        self._file("drivers_license", date_of_birth="1990-01-01")
         body = self.client.get(f"/api/v1/applications/{self.app_row.application_id}").json()
-        self.assertEqual(body["fields"]["city"]["value"], "Dallas")
-        self.assertEqual(body["fields"]["city"]["review_state"], "proposed")
+        self.assertEqual(body["fields"]["dob"]["value"], "1990-01-01")
+        self.assertEqual(body["fields"]["dob"]["review_state"], "proposed")
         self.assertEqual((body["employment"], body["asset"], body["liability"]), ([], [], []))
 
     def test_progress_lists_what_is_missing(self):
@@ -175,22 +177,62 @@ class DatabaseTests(unittest.TestCase):
         self.db.commit()
 
     def test_chat_answers_from_own_documents_with_evidence(self):
-        self._chunk(self._file("bank_statement"), "Ending balance $2,500.00", 0.9)
-        answer = {"answer": "Your balance is $2,500.00 [bank_statement.pdf, page 1]", "citations": [{"page": 1}]}
+        file = self._file("bank_statement")
+        self._chunk(file, "Ending balance $2,500.00", 0.9)
+        answer = {"answer": "Your balance is $2,500.00 [bank_statement.pdf, page 1]", "citations": [{"file_id": str(file.file_id), "page": 1}], "support":[{"file_id":str(file.file_id),"page":1,"quote":"Ending balance $2,500.00"}]}
         with patch.object(chat.ollama, "embed", return_value=[0.1] * 768), \
              patch.object(chat.ollama, "generate_json", return_value=answer) as model:
-            body = self.client.post("/api/v1/chat", json={"question": "What is my balance?"}).json()
+            body = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement."}).json()
         self.assertEqual(body["answer"], answer["answer"])
         self.assertEqual(body["evidence"][0]["content"], "Ending balance $2,500.00")
         self.assertIn("Ending balance $2,500.00", model.call_args.kwargs["prompt"])
 
     def test_chat_without_documents_and_with_index_down(self):
         with patch.object(chat.ollama, "embed", return_value=[0.1] * 768):
-            body = self.client.post("/api/v1/chat", json={"question": "What is my balance?"}).json()
+            body = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement."}).json()
         self.assertEqual(body["citations"], [])
         with patch.object(chat.ollama, "embed", side_effect=chat.ollama.OllamaError("down")):
-            self.assertEqual(self.client.post("/api/v1/chat", json={"question": "hi"}).status_code, 503)
+            self.assertEqual(self.client.post("/api/v1/chat", json={"question": "hi"}).status_code, 200)
         self.assertEqual(self.client.post("/api/v1/chat", json={"question": "  "}).status_code, 400)
+
+    def test_chat_uses_saved_corrections_instead_of_stale_index(self):
+        file = self._file("bank_statement", ending_balance="2500")
+        row = self.db.scalar(select(Extraction).where(Extraction.file_id == file.file_id))
+        row.corrected_value = "2600.00"
+        self.db.commit()
+        self._chunk(file, "Ending balance $2,500.00", 0.9)
+        answer = {"answer": "Your corrected balance is 2600.00", "citations": [{"file_id": str(file.file_id), "page": 1}], "support":[{"file_id":str(file.file_id),"page":1,"quote":"2600.00"}]}
+        with patch.object(chat.ollama, "embed", return_value=[0.1] * 768), patch.object(chat.ollama, "generate_json", return_value=answer) as model:
+            response = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement."})
+        self.assertEqual(response.status_code, 200)
+        passages = json.loads(model.call_args.kwargs["prompt"].split("Evidence:\n", 1)[1].split("\n\nQuestion:", 1)[0])
+        self.assertIn({"field":"ending_balance","value":"2600.00","origin":"customer_correction","role":"document_field","page":1}, passages[0]["saved_fields"])
+        self.assertEqual(response.json()["citations"], answer["citations"])
+
+    def test_chat_rejects_foreign_application_before_calling_model(self):
+        foreign = Customer(customer_id=uuid.uuid4(), email=f"foreign-{uuid.uuid4()}@example.invalid")
+        self.db.add(foreign); self.db.flush()
+        application = Application(application_id=uuid.uuid4(), customer_id=foreign.customer_id)
+        self.db.add(application); self.db.commit()
+        try:
+            with patch.object(chat.ollama, "embed") as embed:
+                response = self.client.post("/api/v1/chat", json={"question": "What is my income?", "application_id": str(application.application_id)})
+            self.assertEqual(response.status_code, 404)
+            embed.assert_not_called()
+            invalid = self.client.post("/api/v1/chat", json={"question": "hi", "application_id": "invalid"})
+            self.assertEqual(invalid.status_code, 422)
+        finally:
+            self.db.execute(delete(Customer).where(Customer.customer_id == foreign.customer_id)); self.db.commit()
+
+    def test_chat_scope_excludes_other_application_documents(self):
+        file = self._file("bank_statement")
+        self._chunk(file, "Private to the first application", 0.9)
+        other = Application(customer_id=self.customer.customer_id)
+        self.db.add(other); self.db.commit()
+        with patch.object(chat.ollama, "embed", return_value=[0.1] * 768), patch.object(chat.ollama, "generate_json") as generate:
+            response = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement.", "application_id": str(other.application_id)})
+        self.assertEqual(response.json()["evidence"], [])
+        generate.assert_not_called()
 
 
 if __name__ == "__main__":

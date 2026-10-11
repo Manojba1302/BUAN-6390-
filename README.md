@@ -136,6 +136,21 @@ Stopping preserves named volumes containing accounts, documents, models, and mar
 - SQL initialization scripts run only on a fresh PostgreSQL volume. Auth tables are added at API startup; later database schema changes need migrations.
 - Login errors: inspect backend logs and use the same `localhost` hostname consistently; do not mix it with `127.0.0.1` in one session.
 
+### Saved document conversations
+
+Chat history is stored in PostgreSQL per customer and application. Reopening chat restores saved questions, answers, and source references. Use the conversation selector to revisit earlier chats, **New chat** to start an empty conversation, and **Delete conversation** to remove its messages without deleting documents.
+
+New questions use current extracted data and saved corrections. Follow-up questions can refer to a single recently discussed document; ambiguous references ask you to choose a document. Historical answers keep their original text and show a notice when a source changes or becomes unavailable. Unsaved edits in a correction form are not used until saved. Messages from the previous in-memory chat implementation cannot be recovered.
+
+Fresh databases run `db/init/008_chat_history.sql` automatically. For an existing installation that already has migrations 001–007, run this once from the HomeFlow folder in PowerShell, then restart the backend:
+
+```powershell
+Get-Content -Raw db/init/008_chat_history.sql | docker compose exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+docker compose -f docker-compose.yml -f compose.auth.yml restart backend
+```
+
+This migration adds two history tables and preserves existing accounts and documents. Closing chat cancels the browser's wait; an answer already being generated can still finish and be saved. Reopening chat reloads its status.
+
 ## 7. Folder map
 
 - `frontend/`: React/TypeScript UI, login and account screens.
@@ -344,3 +359,73 @@ Refresh the browser after the services finish starting. These updates preserve e
 
 
 Name review preserves full names and supports user-confirmed first and last name corrections. Document-owner assignment and cross-person prefill policies are deferred pending Vijay’s clarification. Monetary extraction preserves decimal cents; original model readings and user corrections are retained.
+
+### Account identity and document name suggestions
+
+The welcome message and profile avatar use the signed-in account name. Extracted document names do not change that identity. Application names require review: the form offers separate suggestions with document type, filename and source page. Selecting a suggestion fills its explicit first and last names together; a full name alone is not automatically split. Save and continue confirms the chosen or manually entered name, and subsequent uploads cannot overwrite it. Existing unconfirmed extracted name proposals are cleared when loading the application; confirmed answers remain editable. Different document names are flagged for review, without assigning borrower/co-borrower roles or asserting that the documents belong to the same person. Review other extracted details separately.
+
+### Residential address review
+
+Document addresses are source-labelled suggestions, not automatic residential address updates. Choose an explicitly extracted complete street/city/state/ZIP combination from one document or enter your current residence manually, then Save and continue to confirm it. Incomplete addresses are shown for review but cannot be selected as a complete address. Confirmed values and property address fields are preserved. W-2, pay-stub and bank-statement extraction requests employee/account-holder mailing addresses only, excluding employer and bank addresses. Existing documents reuse a saved owner-name evidence quote when it contains one clearly structured US mailing address consistent with existing fields. Recovered parts are saved with the original page and quote, without a second model call. Ambiguous, conflicting or unsupported address text stays unresolved; reprocessing is only needed when the saved evidence is insufficient.
+
+### Employment matching and review
+
+Employer matching ignores capitalization and repeated whitespace. Documents do not overwrite a customer-confirmed employment entry. Pay-stub income is available as a source-labelled proposal with employee name and monthly-income calculation; the customer explicitly chooses whether to use it. Existing same-employer entries can be reviewed in a combine preview, with choices for conflicting fields and no addition of duplicate income amounts. Combining takes effect on Save and continue. Separate positions can remain separate, and multiple matching jobs are never automatically merged or updated. Names that differ beyond capitalization/spacing are not treated as equivalent automatically.
+
+### Pay rate versus gross earnings
+
+Pay-stub extraction separates printed job title, contractual pay rate and its explicit basis, regular earnings, overtime, bonuses and period gross totals. Base monthly income uses only a printed non-hourly contractual rate: semimonthly 617.50 converts to 1235.00 monthly even when period gross is 961.88. Gross, net and YTD totals are never treated as base salary. Hourly rates require standard-hours review. Existing saved document text can recover explicit labelled Pay Rate and Job Title without another model call; corrections remain authoritative. Income and job-title proposals have separate acceptance actions; confirmed values are not silently changed.
+
+### Income validation and employment history
+
+Current jobs require positive monthly base income to mark Income & finances complete. Previous jobs remain employment history and are excluded from the current employment total; they do not require a current base amount. Currency inputs accept formatted values and blank dates are saved as null. Negative, nonfinite, malformed or oversized employment amounts are rejected before any application fields are saved. Overtime, bonuses and commissions are monthly amounts. Switching a previous job back to current clears its end date. Same-employer history is not automatically matched to a current job.
+
+
+### Document assistant and employment verification
+
+Uploads propose employers; they do not create employment rows. The customer adds an employer once and reviews source-labelled pay-stub income and title suggestions. Multiple W-2s and pay stubs can support that job. Existing duplicate entries require an explicit combine review and Save and continue. Label/value columns in native PDFs are aligned using page coordinates to recover printed Job Title and Pay Rate without another model call. Job title and contractual rate/basis are optional document details; missing base monthly income still prevents completion for current employed applicants.
+
+Use **Ask documents** in the application header to open the document assistant. Each question is independent and scoped to completed documents linked to the current application and owned by the signed-in customer. The prompt includes source file IDs, page text, stored extracted readings for that page, and saved document corrections; corrections take precedence over original values. Citation file/page pairs are validated against retrieved sources before displaying an answer. Source buttons open document review. Invalid sources or unverified answers produce a review message instead. This checks source identity, not the factual accuracy of every model-generated sentence; review source documents before relying on an answer.
+
+The assistant currently answers document questions, not application progress or unsaved form edits, and does not approve loans. Ollama must be running with the configured answer and embedding models. Model/network errors appear in the panel and can be retried. No database columns were added for these changes.
+
+
+Simple field questions now use a read-only allowlist before vector search: license expiry/issue dates, birth dates, names, addresses, pay rates/basis, job titles, employer names, pay dates/periods, bank balances/statement periods/deposit and withdrawal totals, and W-2 years/wages/tax. These answers query customer-owned files in the selected application, preserve explicit saved corrections (including intentional blanks), and list each matching document/owner separately. Missing values return a document-review link instead of an invented answer. Questions requiring explanation, comparison or calculations retain the document-search/LLM path. Recognized field questions never require Ollama; unfamiliar wording may still fall back to search.
+
+
+Document inventory supports count/list wording (including “How many documents do I have?” and document-type counts) without Ollama. Inventory results are labelled with their application/account scope and offer document links rather than fabricated page citations. The chat panel supports stopping the browser request, cancels it when the panel closes, and shows elapsed-wait feedback. Browser cancellation stops waiting for the reply; an already-running Ollama job may continue until the server-side timeout. Field and inventory routing currently use tested synonyms, so unfamiliar wording can still take the slower search path; explanation requests depend on local model speed and availability.
+
+
+### Chat question regression set
+
+`backend/tests/fixtures/chat_questions.json` contains 248 synthetic field-question cases across the five supported document types. `tests.chat_question_matrix_test` checks the saved-field route and additional natural-language examples, identifier masking, and correction handling. Run from the backend environment: `python -m unittest tests.chat_question_matrix_test tests.chat_grounding_test`. Database tests additionally verify ownership, missing fields, per-document answers and counts. This is a regression/evaluation set, not LLM fine-tuning or proof of extraction accuracy. New document types need a catalogue definition, extraction/validation examples, and representative document tests before they are considered supported. SSN, license and account identifiers are masked in direct chat answers; users can reveal sensitive fields through authenticated document review.
+
+### Chat model evaluation (October 10, 2026)
+
+`CHAT_MODEL` selects only the broader chat answer model; it does not change `EXTRACTOR_MODEL`, `VISION_MODEL` or `EMBED_MODEL`. The default remains `llama3.1:8b`. To evaluate an alternative, pull its Ollama model first, set `CHAT_MODEL` in the private `.env`, and recreate the backend using your normal Compose files. Restarting alone does not reload changed environment variables.
+
+Local CPU testing of `llama3.2:3b` completed eight broader questions in 9.6–35.1 seconds, whereas the earlier 8B baseline timed out on three questions around 45 seconds. Faster answers did not establish correctness: observed errors included an invented pay basis, misleading address comparisons, incomplete comparison citations and a future-pay claim. Four targeted retests after prompt/retrieval improvements completed in 14.4–42.2 seconds; incomplete comparisons and source mislabelling remained. The 3B model is therefore **not approved as the default**.
+
+Chat now balances retrieved passages across files, filters explicit document types, removes duplicate pages, supplies source-type metadata and caps generated output. Cross-document comparisons without citations covering each supplied source are rejected with document review links. Next-paycheck questions receive an explicit limitation rather than a prediction. These checks reduce risk but do not prove every generated statement is true. The regression suite covers field routing, saved corrections, account isolation, history and citation handling; live model evaluation remains separate from those deterministic tests.
+
+The final live employer comparison exposed a hyphenated `W-2` alias bug, now fixed and regression-tested. With both sources present the 3B model returned two valid citations in 25.7 seconds, but incorrectly described an employee address as an employer address and omitted the pay-slip employer. Valid citations alone therefore cannot establish semantic correctness. The final deterministic suite passed 47 tests (including the schema-driven field-question matrix). Extraction model settings and stored customer records were not changed by this evaluation.
+
+### Structured chat comparisons
+
+Employer-name comparisons, document-holder address comparisons and pay-rate-versus-gross explanations now use saved extracted fields directly, before model search. Saved corrections (including intentionally blank corrections) take priority. Results list each document separately with page references; employer names are compared only after case/whitespace normalization, and full address components remain together. No identity, job merge or current-residence decision is made automatically. Missing or processing data is identified explicitly. These answers describe the saved readings; they do not independently verify OCR accuracy or document authenticity.
+
+Local validation answered the three previously failing cases in 0.004–0.009 seconds without any model call. The expanded regression suite passed 53 tests. Open-ended summaries still use the configurable LLM route and retain the previously documented CPU performance and accuracy limitations.
+
+### General evidence-based document chat
+
+Use **Other document** for an optional supported PDF/image outside the predefined categories. It remains subject to the existing classification/override review flow; choosing Other does not verify authenticity or ownership. The worker preserves readable text and page numbers without requiring predefined extraction fields. Unknown files do not populate application fields automatically. Blank/unreadable scans still require a clearer upload; the system cannot search text it could not read.
+
+Readable chunks are now stored even if the embedding service fails. Hybrid retrieval searches page text and saved extracted fields, with vector search when available and keyword fallback when embeddings are unavailable. Every query filters customer ownership and the application association before returning evidence. Previously discarded chunks are not reconstructed automatically; affected documents need reprocessing through the supported processing flow.
+
+Evidence includes document type, page, saved values, correction origin and field role (document holder, employer or period). Intentionally blank corrections remain unknown. The chat model is asked for a schema-constrained response containing source IDs, pages and supporting quotes; invented or missing quotes are rejected with review links. A quote match is not a guarantee of semantic accuracy. The existing structured fast paths remain, while unqualified questions with an Other document present use general retrieval to avoid interpreting an unfamiliar document as a driver's license.
+
+Exact tools support explicitly named pairs of extracted amounts (sum or absolute difference) and ISO dates (days between), separately for each document. They preserve cents with Decimal, reject missing/nonfinite values, and do not combine different people, currencies or pay periods. Requests with ambiguous operands continue through evidence search instead of guessing a calculation. Examples: `What is the difference between gross pay and net pay?` and `How many days between issue date and expiry date?`.
+
+Model evaluation remains ongoing. With compact synthetic unfamiliar lease/insurance evidence, the 3B candidate returned quote-supported answers in 8–9 seconds. Larger real summaries still timed out or failed support checks, and the retained 8B default timed out even on a small lease example on this CPU. These limitations remain; the new architecture must not be described as guaranteeing broad question answering or as an approved 3B model switch.
+
+Final general-pipeline checks: 60 backend tests and 30 worker tests passed; TypeScript/Vite build passed. An end-to-end isolated test confirmed that `When does my lease expire?` uses an Other document's text rather than a license expiry fast path, even with embeddings offline. The installed `gemma3:4b` candidate answered the short unfamiliar insurance example in 36.3 seconds but timed out on the real pay-slip summary; it was not adopted. No existing customer records were reset or migrated for this change.

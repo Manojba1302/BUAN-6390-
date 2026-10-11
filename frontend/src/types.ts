@@ -80,7 +80,25 @@ export interface FieldValue {
   method: string | null;
 }
 
+export interface NameSuggestion {
+  file_id: string; file_name: string; document_type: string; page: number | null;
+  label: string; full_name: string; first_name: string; last_name: string;
+}
+
+export interface AddressSuggestion {
+  file_id: string; file_name: string; document_type: string; page: number | null;
+  label: string; address: string; city: string; state: string; zip: string;
+}
+
+export interface EmploymentSuggestion {
+  file_id: string; file_name: string; employer_name: string; employee_name: string; document_type: string;
+  base: string | null; position: string; gross_pay: string | null; pay_rate: string | null; pay_frequency: string; calculation: string; page: number | null;
+}
+
 export interface ApplicationState {
+  employment_suggestions?: EmploymentSuggestion[];
+  address_suggestions?: AddressSuggestion[];
+  name_suggestions?: NameSuggestion[];
   application_id: string;
   customer_id?: string;
   status: string;

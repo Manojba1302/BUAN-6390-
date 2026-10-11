@@ -17,7 +17,7 @@ from app.db.models import (
 )
 from app.core.security import current_customer
 from app.db.session import get_db
-from app.services import audit, prefill as prefill_service
+from app.services import audit, income_validation, employment_suggestions, address_suggestions, name_suggestions, prefill as prefill_service
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -78,6 +78,8 @@ def patch_application(application_id: UUID, patch: ApplicationPatch,
     if app.status != "draft":
         raise HTTPException(status.HTTP_409_CONFLICT, "A submitted application cannot be edited")
 
+    if patch.employment is not None:
+        patch.employment = income_validation.clean_rows(patch.employment)
     _save_fields(db, app, patch.fields)
     _save_declarations(db, app, patch.declarations)
     for name, model in REPEATABLE_MODELS.items():
@@ -137,6 +139,9 @@ def _serialise(db: Session, app: Application) -> dict:
         "status": app.status,
         "current_step": app.current_step,
         "fields": _serialise_fields(db, app),
+        "name_suggestions": name_suggestions.suggestions(db, app),
+        "address_suggestions": address_suggestions.suggestions(db, app),
+        "employment_suggestions": employment_suggestions.suggestions(db, app),
         "declarations": {
             d.code: d.answer for d in db.scalars(
                 select(Declaration).where(Declaration.application_id == app.application_id))
@@ -256,13 +261,9 @@ def _amount_errors(values: dict) -> list[str]:
 
 def _employment_errors(values: dict, employment: list) -> list[str]:
     status = values.get("employmentStatus")
-    errors = []
-    if status == "Employed" and any(not (row.get("employer_name") or "").strip() for row in employment):
-        errors.append("Employer name")
+    errors = income_validation.employment_errors(employment, status == "Employed")
     if status in REQUIRED_INCOME and not any(str(values.get(n) or "").strip() for n in REQUIRED_INCOME[status]):
         errors.append("Enter monthly income, or 0 if none")
-    if status == "Employed" and employment and any(not row.get("base") for row in employment):
-        errors.append("Base monthly employment income")
     return errors
 
 

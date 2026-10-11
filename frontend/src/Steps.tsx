@@ -1,15 +1,22 @@
 /** Every step except documents is rendered straight from the field dictionary.
  *  Adding a field to the JSON adds it to the screen, with no change here. */
+import { useEffect, useState } from "react";
 import { Icon } from "./icons";
 import { money, money2, num } from "./format";
 import { Cards, Field, Segmented } from "./ui";
 import type {
-  Dictionary, FieldSpec, GroupSpec, Progress, RepeatableSpec, StepSpec,
+  Dictionary, FieldSpec, GroupSpec, Progress, RepeatableSpec, StepSpec, NameSuggestion, AddressSuggestion, EmploymentSuggestion,
 } from "./types";
 
 export interface Provenance { fileName: string; page: number | null; fileId: string }
 
 export interface StepProps {
+  employmentSuggestions: EmploymentSuggestion[];
+  addressSuggestions: AddressSuggestion[];
+  onChooseAddress: (candidate: AddressSuggestion) => void;
+  accountName: string;
+  nameSuggestions: NameSuggestion[];
+  onChooseName: (candidate: NameSuggestion) => void;
   dictionary: Dictionary;
   step: StepSpec;
   values: Record<string, string>;
@@ -35,7 +42,7 @@ export function FormStep(props: StepProps) {
       <h1 className="h1">{step.title}</h1>
       <p className="lede">{step.lede}</p>
       {focused && <>
-        <div className="journey-start"><div><b>{props.values.firstName ? `Welcome, ${props.values.firstName}.` : "Choose your starting point"}</b><p>Answer a few questions, or upload your documents first and review any suggested answers.</p></div><button className="btn sec" onClick={() => props.onGo(1)}><Icon name="upload" />Start with documents</button></div>
+        <div className="journey-start"><div><b>{props.accountName ? `Welcome, ${props.accountName}.` : "Choose your starting point"}</b><p>Answer a few questions, or upload your documents first and review any suggested answers.</p></div><button className="btn sec" onClick={() => props.onGo(1)}><Icon name="upload" />Start with documents</button></div>
       </>}
       {step.groups.some(g => g.fields?.some(n => props.provenance[n])) && <div className="prefill-notice"><Icon name="spark" /><div><b>A head start from your documents</b><p>Review the suggested details below. You can edit any answer or open its source.</p></div></div>}
       {step.groups.map((group, i) => (
@@ -44,6 +51,43 @@ export function FormStep(props: StepProps) {
       {step.id === "review" && <Summary {...props} />}
     </>
   );
+}
+
+function NameSuggestions(props: StepProps) {
+  const candidates = props.nameSuggestions;
+  if (!candidates.length) return null;
+  const normalise = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const different = new Set([...candidates.map(c => normalise(c.label)), normalise(props.accountName)].filter(Boolean)).size > 1;
+  return <div className="name-suggestions">
+    <details><summary><Icon name="user" /><span className="suggestion-title">{different ? "Review your name" : "Use a name from your documents"}</span><span className="suggestion-count">{candidates.length} sources</span></summary>
+      <p>Choose your name or type it below. Documents may belong to different people.</p>
+      <div className="name-candidates">{candidates.map(candidate => <div key={candidate.file_id} className="name-candidate">
+        <div><b>{candidate.label}</b><small>{candidate.document_type} · {candidate.file_name}{candidate.page ? ` · page ${candidate.page}` : ""}</small>
+        {(!candidate.first_name || !candidate.last_name) && <small>First and last names are not both available. Enter them below; we will not split this name.</small>}</div>
+        <div className="name-actions"><button type="button" className="btn sec" onClick={() => props.onOpenSource(candidate.file_id)}>View source</button>
+        <button type="button" className="btn" disabled={!candidate.first_name || !candidate.last_name} onClick={() => props.onChooseName(candidate)}>Use this name</button></div>
+      </div>)}</div>
+    </details>
+    <small>Your choice is confirmed when you continue.</small>
+  </div>;
+}
+
+function AddressSuggestions(props: StepProps) {
+  const candidates = props.addressSuggestions;
+  if (!candidates.length) return null;
+  const different = new Set(candidates.map(c => c.label.toLowerCase().replace(/[^a-z0-9]/g, ""))).size > 1;
+  return <div className="name-suggestions">
+    <details><summary><Icon name="home" /><span className="suggestion-title">{different ? "Review your address" : "Use an address from your documents"}</span><span className="suggestion-count">{candidates.length} sources</span></summary>
+      <p>Choose your current home address or type it below. Document addresses may be outdated.</p>
+      <div className="name-candidates">{candidates.map(candidate => <div key={candidate.file_id} className="name-candidate">
+        <div><b>{candidate.label}</b><small>{candidate.document_type} · {candidate.file_name}{candidate.page ? ` · page ${candidate.page}` : ""}</small>
+        {(!candidate.address || !candidate.city || !candidate.state || !candidate.zip) && <small>Incomplete address. View the source and enter the missing details below.</small>}</div>
+        <div className="name-actions"><button type="button" className="btn sec" onClick={() => props.onOpenSource(candidate.file_id)}>View source</button>
+        <button type="button" className="btn" disabled={!candidate.address || !candidate.city || !candidate.state || !candidate.zip} onClick={() => props.onChooseAddress(candidate)}>Use this address</button></div>
+      </div>)}</div>
+    </details>
+    <small>Your choice is confirmed when you continue.</small>
+  </div>;
 }
 
 function visible(spec: FieldSpec, values: Record<string, string>): boolean {
@@ -76,6 +120,9 @@ function Group(props: StepProps & { group: GroupSpec }) {
         <Cards key={name} options={dictionary.option_sets[dictionary.fields[name].options ?? ""] ?? []}
                value={values[name] ?? ""} onChange={(v) => onChange(name, v)} />
       ))}
+
+      {names.includes("addr1") && <AddressSuggestions {...props} />}
+      {names.includes("firstName") && <NameSuggestions {...props} />}
 
       {plain.length > 0 && (
         <div className={`grid g2 ${names.includes("addr1") ? "address-grid" : ""}`}>
@@ -126,13 +173,17 @@ function Repeatable(props: StepProps & { kind: string; title: string }) {
     onRows(kind, next);
   };
 
-  const total = list.reduce((a, row) =>
+  const invalidIncome = kind === "employment" && list.filter(row => row.is_current !== false).some(row => ["base", "overtime", "bonuses", "commissions"].some(key => row[key] != null && String(row[key]).trim() !== "" && !/^(?:\$)?[\d,]+(?:\.\d{1,2})?$/.test(String(row[key]).trim())));
+  const total = list.filter(row => row.is_current !== false).reduce((a, row) =>
     a + num(row.base) + num(row.overtime) + num(row.bonuses) + num(row.commissions), 0);
 
   return (
     <section className="card">
       <h2>{title}</h2>
       {spec.hint && <p className="hint">{spec.hint}</p>}
+
+      {kind === "employment" && <DocumentEmployers {...props} list={list} />}
+      {kind === "employment" && <EmploymentReview {...props} list={list} />}
 
       {list.map((row, index) => (
         <div className="rep" key={index}>
@@ -144,6 +195,17 @@ function Repeatable(props: StepProps & { kind: string; title: string }) {
               <Icon name="trash" />
             </button>
           </div>
+          {kind === "employment" && <div className="employment-status">
+            <label className="cap" htmlFor={`job-status-${index}`}>Employment status</label>
+            <select className="ctl" id={`job-status-${index}`} value={row.is_current === false ? "previous" : "current"}
+              onChange={e => onRows(kind, list.map((item, i) => i === index ? {...item, is_current: e.target.value === "current", ...(e.target.value === "current" ? {end_date: null} : {})} : item))}>
+              <option value="current">Current job — include in monthly income</option><option value="previous">Previous job — employment history only</option>
+            </select>
+            {row.is_current === false && <div className="f"><label className="cap" htmlFor={`job-end-${index}`}>End date</label>
+              <input type="date" className="ctl" id={`job-end-${index}`} value={String(row.end_date ?? "")} onChange={e => update(index, "end_date", e.target.value)} />
+              <small>This job's income is excluded from the current monthly total.</small></div>}
+          </div>}
+          {kind === "employment" && row.is_current !== false && <IncomeSuggestions {...props} row={row} index={index} list={list} />}
           <div className="grid g2">
             {spec.fields.map((f) => (
               <div className="f" key={f.id}>
@@ -164,6 +226,8 @@ function Repeatable(props: StepProps & { kind: string; title: string }) {
                     <input id={`${kind}${index}_${f.id}`} className="ctl" inputMode="decimal"
                            value={String(row[f.id] ?? "")}
                            onChange={(e) => update(index, f.id, e.target.value)} />
+                    {row[f.id] !== undefined && String(row[f.id]).trim() !== "" && !/^(?:\$)?[\d,]+(?:\.\d{1,2})?$/.test(String(row[f.id]).trim()) && <small role="alert" style={{color:"#b42318"}}>Enter a nonnegative monthly amount.</small>}
+                    {kind === "employment" && f.id === "base" && row.is_current !== false && num(row[f.id]) <= 0 && <small style={{color:"#b42318"}}>Enter or review a positive monthly base income for this current job.</small>}
                   </div>
                 ) : (
                   <input id={`${kind}${index}_${f.id}`} className="ctl"
@@ -174,7 +238,7 @@ function Repeatable(props: StepProps & { kind: string; title: string }) {
                 )}
                 {f.id === "base" && row.pay_frequency ? (
                   <p className="help">
-                    {String(row.pay_frequency)} pay converted to a monthly figure. Change it if that is wrong.
+                    Monthly base amount from a {String(row.pay_frequency)} printed pay rate. Review it; period gross may contain additional earnings.
                   </p>
                 ) : null}
               </div>
@@ -189,11 +253,68 @@ function Repeatable(props: StepProps & { kind: string; title: string }) {
 
       {kind === "employment" && list.length > 0 && (
         <div className="totrow">
-          <b>Total monthly income</b><span className="amt">{money2(total)}</span>
+          <b>Total current monthly employment income</b><span className="amt">{invalidIncome ? "Review invalid amounts" : money2(total)}</span>
         </div>
       )}
     </section>
   );
+}
+
+const employerKey = (value: unknown) => String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+function DocumentEmployers(props: StepProps & { list: Record<string, unknown>[] }) {
+  const groups = [...new Set(props.employmentSuggestions.map(c => employerKey(c.employer_name)))];
+  if (!groups.length) return null;
+  return <details className="name-suggestions employer-suggestions"><summary><Icon name="folder" /><span className="suggestion-title">Employers from your documents</span><span className="suggestion-count">{groups.length} found</span></summary><p>Add a missing job here. Multiple documents can support the same job.</p>
+    {groups.map(key => {
+      const sources = props.employmentSuggestions.filter(c => employerKey(c.employer_name) === key);
+      const candidate = sources[0];
+      const exists = props.list.some(row => row.is_current !== false && employerKey(row.employer_name) === key);
+      return <div className="name-candidate" key={key}><b>{candidate.employer_name}</b><small>{sources.length} supporting {sources.length === 1 ? "document" : "documents"}</small>
+        {exists ? <span className="employer-added"><Icon name="check" />Added to your jobs</span> : <button className="btn sec" type="button" onClick={() => props.onRows("employment", [...props.list, {employer_name: candidate.employer_name, is_current: true, base: "", position: ""}])}><Icon name="plus" />Add job</button>}
+      </div>;
+    })}</details>;
+}
+
+function IncomeSuggestions(props: StepProps & { row: Record<string, unknown>; index: number; list: Record<string, unknown>[] }) {
+  const candidates = props.employmentSuggestions.filter(c => c.document_type === "paystub" && employerKey(c.employer_name) === employerKey(props.row.employer_name));
+  if (!candidates.length) return null;
+  return <details className="name-suggestions"><summary>Review document income suggestions</summary>
+    <p>Apply only the income for this job and person. Your position and start date will stay unchanged.</p>
+    {candidates.map(c => <div className="name-candidate" key={c.file_id}><b>{c.base !== null ? `${money2(num(c.base))} base income per month` : "Base income needs review"}</b>
+      <small>{c.employee_name || "Employee name unavailable"} · {c.file_name}{c.page ? ` · page ${c.page}` : ""}</small><small>{c.calculation}</small>{c.gross_pay && <small>Total gross for this period: {money2(num(c.gross_pay))} — may include additional earnings.</small>}
+      <div className="name-actions"><button className="btn sec" type="button" onClick={() => props.onOpenSource(c.file_id)}>View source</button>
+      <button className="btn" type="button" disabled={c.base === null} onClick={() => props.onRows("employment", props.list.map((row, i) => i === props.index ? {...row, base: c.base, pay_frequency: c.pay_frequency} : row))}>Use this base income</button>
+      {c.position && <button className="btn sec" type="button" onClick={() => props.onRows("employment", props.list.map((row, i) => i === props.index ? {...row, position: c.position} : row))}>Use job title: {c.position}</button>}</div>
+    </div>)}<small>Save and continue to confirm your choice. Income proposals are alternatives, not amounts to add together.</small>
+  </details>;
+}
+
+function EmploymentReview(props: StepProps & { list: Record<string, unknown>[] }) {
+  const [preview, setPreview] = useState<{ first: number; second: number; merged: Record<string, unknown> } | null>(null);
+  useEffect(() => { setPreview(null); }, [props.list]);
+  const pairs = props.list.flatMap((row, first) => props.list.flatMap((other, second) =>
+    second > first && (row.is_current !== false) === (other.is_current !== false) && employerKey(row.employer_name) && employerKey(row.employer_name) === employerKey(other.employer_name) ? [{first, second}] : []));
+  if (!pairs.length) return null;
+  const start = (first: number, second: number) => {
+    const merged = {...props.list[first]};
+    for (const [key, value] of Object.entries(props.list[second])) if (merged[key] === null || merged[key] === undefined || merged[key] === "") merged[key] = value;
+    setPreview({first, second, merged});
+  };
+  return <div className="name-suggestions duplicate-review"><div className="suggestion-warning"><Icon name="alert" /><div><b>Possible duplicate jobs</b><p>Check these entries before continuing. Current jobs both count toward income.</p></div></div>
+    {pairs.map(pair => <button type="button" className="btn sec" key={`${pair.first}-${pair.second}`} onClick={() => start(pair.first, pair.second)}>Compare jobs {pair.first + 1} & {pair.second + 1}</button>)}
+    {preview && <div className="name-candidate"><h3>Preview combined job</h3><p>Existing values are kept by default. Choose which conflicting details to keep. Amounts will not be added together.</p>
+      {props.dictionary.repeatables.employment.fields.map(field => {
+        const a = String(props.list[preview.first]?.[field.id] ?? ""), b = String(props.list[preview.second]?.[field.id] ?? "");
+        return <div className="f" key={field.id}><label className="cap">{field.label}</label>{a && b && a !== b ?
+          <select className="ctl" aria-label={`Keep ${field.label}`} value={String(preview.merged[field.id] ?? "")} onChange={e => setPreview({...preview, merged: {...preview.merged, [field.id]: e.target.value, ...(field.id === "base" ? {pay_frequency: props.list[e.target.value === b ? preview.second : preview.first].pay_frequency} : {})}})}>
+            <option value={a}>Entry {preview.first + 1}: {a}</option><option value={b}>Entry {preview.second + 1}: {b}</option>
+          </select> : <p>{String(preview.merged[field.id] ?? "") || "Not entered"}</p>}</div>;
+      })}
+      <div className="name-actions"><button type="button" className="btn" onClick={() => {props.onRows("employment", props.list.flatMap((row, i) => i === preview.second ? [] : [i === preview.first ? {...preview.merged, source_file_id: null} : row])); setPreview(null);}}>Combine these entries</button>
+      <button type="button" className="btn sec" onClick={() => setPreview(null)}>Keep separate jobs</button></div><small>Save and continue to persist the combined entry. Documents remain in your vault.</small>
+    </div>}
+  </div>;
 }
 
 /* ---------------------------------------------------------- declarations */

@@ -87,7 +87,7 @@ class IncomeRuleTests(unittest.TestCase):
         self.assertTrue(any(e.startswith("Enter a valid") for e in _income_errors(values, [])))
 
     def test_hidden_fields_are_ignored(self):
-        self.assertEqual(_income_errors({"employmentStatus": "Employed", "pensionIncome": "-1"}, []), [])
+        self.assertEqual(_income_errors({"employmentStatus": "Employed", "pensionIncome": "-1"}, [{"employer_name": "Example", "base": "1000"}]), [])
 
     def test_employed_needs_employer_name_and_base(self):
         errors = _income_errors({"employmentStatus": "Employed"}, [{"employer_name": " ", "base": None}])

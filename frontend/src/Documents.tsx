@@ -342,11 +342,11 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       : <span className="chip n">Stored</span>;
 
   return (
-    <div className="document-card">
+    <div className={`document-card document-type-${doc.document_tag}`}>
     <button className="vcard" onClick={() => onOpen(doc.file_id)}>
       <span className="vt"><Icon name={CATEGORY_ICON[doc.document_tag] ?? "doc"} /></span>
       <span className="vb">
-        <b>{doc.original_name}</b>
+        <b title={doc.original_name}>{doc.original_name}</b>
         <span>{doc.display_name} &middot; {bytes(doc.size_bytes)}</span>
         {doc.classification && <span>AI detected: {doc.classification.detected_type.replaceAll("_", " ")}</span>}
         <span>{doc.extracted_field_count} fields read{doc.missing_field_count > 0 ? ` · ${doc.missing_field_count} missing` : ""}</span>
@@ -354,11 +354,11 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       </span>
     </button>
     {mode && <div className="document-actions">
-      <button className="btn sec" onClick={() => onOpen(doc.file_id)}>Preview</button>
-      {mode === "application" ? <button className="btn sec" disabled={working || locked} onClick={() => void act("remove")}>Remove from application</button>
+      <button className="btn sec doc-preview-action" onClick={() => onOpen(doc.file_id)}><Icon name="eye" />Preview</button>
+      {mode === "application" ? <button className="btn sec" disabled={working || locked} onClick={() => void act("remove")}><Icon name="x" />Remove from application</button>
         : <>
           {applicationId && !doc.application_id && <button className="btn sec" disabled={working} onClick={() => void act("link")}>Use in application</button>}
-          <button className="btn sec danger" disabled={working || locked || ["queued","processing"].includes(doc.status)} onClick={() => void act("delete")}>Delete permanently</button>
+          <button className="btn sec danger" disabled={working || locked || ["queued","processing"].includes(doc.status)} onClick={() => void act("delete")}><Icon name="trash" />Delete permanently</button>
         </>}
       {locked && <small className="hint">Linked to a submitted application</small>}
     </div>}

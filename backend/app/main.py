@@ -6,7 +6,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import applications, auth, chat, documents, fields, health
+from app.api.v1 import applications, auth, chat, conversations, documents, fields, health
 from app.core.config import settings
 from app.services import storage
 
@@ -27,7 +27,7 @@ app.add_middleware(
 )
 
 for router in (auth.router, health.router, fields.router, applications.router,
-               documents.router, chat.router):
+               documents.router, chat.router, conversations.router):
     app.include_router(router, prefix=settings.api_prefix)
 
 

@@ -4,6 +4,16 @@ import type {
   DocumentDetail, DocumentSummary, Progress,
 } from "./types";
 
+export interface ChatReply {
+  answer: string; document_links?: {file_id: string; original_name: string}[];
+  citations: {file_id: string; page: number}[];
+  evidence: {file_id: string; original_name: string; page: number}[];
+}
+export interface SavedChatTurn {
+  turn_id: string; question: string; reply: ChatReply | null; error: string | null;
+  status: "pending" | "completed" | "failed"; source_status: Record<string, string>; created_at: string;
+}
+
 const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api/v1";
 
 function headers(extra: Record<string, string> = {}): Record<string, string> {
@@ -21,6 +31,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     response = await fetch(`${BASE}${path}`, { ...init, credentials: "include" });
   } catch {
+    if (init.signal?.aborted) throw new ApiError("The assistant took too long. Please try again.", 408);
     throw new ApiError("We could not reach the server. Check your connection.", 0);
   }
   if (!response.ok) {
@@ -124,12 +135,19 @@ export const api = {
   unlink: (fileId: string) =>
     request<void>(`/documents/${fileId}`, { method: "DELETE", headers: headers() }),
 
-  ask: (question: string, applicationId: string) =>
-    request<{ answer: string; evidence: { original_name: string; page: number }[] }>(
+  conversations: (applicationId: string) => request<{conversation_id: string; created_at: string; updated_at: string; title: string}[]>(`/chat/conversations?application_id=${applicationId}`),
+  newConversation: (applicationId: string) => request<{conversation_id: string}>("/chat/conversations", {...json({application_id:applicationId}), method:"POST"}),
+  chatHistory: (id: string) => request<{conversation_id: string; turns: SavedChatTurn[]}>(`/chat/conversations/${id}`),
+  deleteConversation: (id: string) => request<void>(`/chat/conversations/${id}`, {method:"DELETE"}),
+  sendMessage: (id: string, question: string, signal?: AbortSignal) => request<SavedChatTurn>(`/chat/conversations/${id}/messages`, {...json({question}), method:"POST", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(150000)]) : AbortSignal.timeout(150000)}),
+
+  ask: (question: string, applicationId: string, signal?: AbortSignal) =>
+    request<{ answer: string; document_links?: { file_id: string; original_name: string }[]; citations: { file_id: string; page: number }[]; evidence: { file_id: string; original_name: string; page: number }[] }>(
       "/chat", {
         method: "POST",
         headers: headers({ "Content-Type": "application/json" }),
         body: JSON.stringify({ question, application_id: applicationId }),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(150000)]) : AbortSignal.timeout(150000),
       }),
 };
 

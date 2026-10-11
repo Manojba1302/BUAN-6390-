@@ -10,6 +10,9 @@ import logging
 import re
 from datetime import datetime
 
+import pay_evidence
+import address_evidence
+import bank_evidence
 import money_values
 import doc_types
 import ollama
@@ -116,7 +119,7 @@ def _result(selected: str, detected: str, readable: bool,
 def extract(document: dict, document_tag: str) -> dict[str, dict]:
     """Fields for the tag the customer chose, with the quote they came from."""
     spec = doc_types.get_type(document_tag)
-    if spec is None:
+    if spec is None or not spec.get("extract"):
         return {}
 
     prompt = doc_types.extraction_prompt(document_tag)
@@ -125,6 +128,11 @@ def extract(document: dict, document_tag: str) -> dict[str, dict]:
         answer = _extract_page(prompt, page, index)
         if answer is not None:
             _collect_fields(out, answer, spec, page, index)
+    out.update(pay_evidence.recover(document_tag, [{**page, "page": i} for i, page in enumerate(document["pages"][:6], 1)], out))
+    out.update(address_evidence.recover(document_tag, out))
+    numbered = [{**page, "page": i} for i, page in enumerate(document["pages"][:6], 1)]
+    out.update(address_evidence.recover_pages(document_tag, numbered, out))
+    out.update(bank_evidence.recover(document_tag, numbered))
     return out
 
 
@@ -149,7 +157,7 @@ def _collect_fields(out: dict, answer: dict, spec: dict, page: dict, index: int)
         if name not in spec["extract"] or name in out:
             continue
         value = _clean(payload)
-        if value is not None:
+        if value is not None and (name != "position" or pay_evidence.valid_title(value)):
             out[name] = _field_entry(name, value, payload, page, index)
 
 
@@ -238,7 +246,8 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
     for item in chunks:
         try:
             item["embedding"] = ollama.embed(model=config.embed_model, text=item["content"])
-            done.append(item)
         except ollama.OllamaError as exc:
             log.warning("embedding failed for chunk %s: %s", item["index"], exc)
+            item["embedding"] = None
+        done.append(item)
     return done

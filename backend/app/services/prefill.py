@@ -39,6 +39,10 @@ for _tag in ("drivers_license", "paystub", "w2", "ssn_card"):
 
 PAY_PERIODS_PER_YEAR = {"weekly": 52, "biweekly": 26, "semimonthly": 24, "monthly": 12}
 
+NAME_FIELDS = {"firstName", "lastName", "legalName"}
+ADDRESS_FIELDS = {"addr1", "city", "state", "zip"}
+REVIEW_FIELDS = NAME_FIELDS | ADDRESS_FIELDS
+
 NEVER_PREFILL = {"econsent"}  # declarations live in their own table and are never touched
 
 
@@ -48,6 +52,7 @@ def apply_pending(db: Session, *, application_id: UUID) -> dict:
     Safe to run on every load: applying the same extraction twice writes the
     same proposal, and a value the customer confirmed is skipped either way.
     """
+    _clear_unconfirmed_identity(db, application_id)
     files = db.scalars(select(File).where(
         File.application_id == application_id, File.status == "completed")).all()
     totals = {"applied": 0, "skipped": 0, "files": len(files)}
@@ -56,6 +61,17 @@ def apply_pending(db: Session, *, application_id: UUID) -> dict:
         totals["applied"] += result["applied"]
         totals["skipped"] += result["skipped"]
     return totals
+
+
+def _clear_unconfirmed_identity(db: Session, application_id: UUID) -> None:
+    rows = db.scalars(select(ApplicationField).where(
+        ApplicationField.application_id == application_id,
+        ApplicationField.field_name.in_(REVIEW_FIELDS),
+        ApplicationField.source == "extracted",
+        ApplicationField.review_state == "proposed")).all()
+    for row in rows:
+        db.delete(row)
+    db.commit()
 
 
 def apply_file(db: Session, *, file: File) -> dict:
@@ -79,7 +95,7 @@ def _apply_direct(db: Session, file: File, values: dict[str, Extraction]) -> tup
     applied = skipped = 0
     for doc_field, row in values.items():
         target = DIRECT_MAP.get((file.document_tag, doc_field))
-        if not target or target in NEVER_PREFILL:
+        if not target or target in NEVER_PREFILL or target in REVIEW_FIELDS:
             continue
         if _set_field(db, file, target, row):
             applied += 1
@@ -141,13 +157,12 @@ def _apply_employment(db: Session, file: File, values: dict[str, Extraction]) ->
     name = _get(values, "employer_name")
     if not name:
         return
-    row = db.scalar(select(Employment).where(
-        Employment.application_id == file.application_id,
-        Employment.employer_name == name))
+    matches = _matching_jobs(db, file.application_id, name)
+    if len(matches) > 1:
+        return  # Multiple real jobs must be resolved by the customer, never guessed.
+    row = matches[0] if matches else None
     if row is None:
-        row = Employment(application_id=file.application_id, employer_name=name,
-                         source_file_id=file.file_id)
-        db.add(row)
+        return  # Documents propose jobs; only the customer adds an employment record.
     if row.source_file_id is None:
         return  # Preserve customer-confirmed employment.
     if "position" in values and not row.position:
@@ -155,20 +170,33 @@ def _apply_employment(db: Session, file: File, values: dict[str, Extraction]) ->
     _apply_pay(row, file, values)
 
 
+def _matching_jobs(db: Session, application_id: UUID, employer: str) -> list[Employment]:
+    key = " ".join(employer.split()).casefold()
+    rows = db.scalars(select(Employment).where(Employment.application_id == application_id, Employment.is_current.is_(True))).all()
+    return [row for row in rows if " ".join((row.employer_name or "").split()).casefold() == key]
+
+
+def base_monthly(values: dict[str, Extraction]):
+    rate = _decimal(_get(values, "pay_rate"))
+    basis = (_get(values, "pay_rate_basis") or "").strip().lower()
+    if rate is None or rate <= 0:
+        return None, None, "Printed base pay rate unavailable; total gross pay is not base salary."
+    if basis == "annual":
+        monthly = (rate / 12).quantize(Decimal("0.01"))
+        return monthly, basis, f"Printed annual base rate {rate} / 12 = {monthly} a month"
+    monthly, note = monthly_from_pay(rate, basis)
+    return monthly, basis, f"Printed base rate: {note}" if note else "Hourly or unclear rate requires standard hours and review; base income is not calculated."
+
+
 def _apply_pay(row: Employment, file: File, values: dict[str, Extraction]) -> None:
-    gross = _decimal(_get(values, "gross_pay"))
-    freq = _get(values, "pay_frequency")
-    if gross is None:
+    if file.document_tag != "paystub":
         return
-    monthly, _note = monthly_from_pay(gross, freq)
+    monthly, frequency, _note = base_monthly(values)
     if monthly is not None:
-        row.base = monthly
-        row.pay_frequency = freq
-    else:
-        # We know the gross but not the period. Leave income blank rather
-        # than assume monthly, and let the customer say which it is.
-        row.pay_frequency = None
-        log.info("pay frequency not stated on %s, leaving base blank", file.file_id)
+        row.base, row.pay_frequency = monthly, frequency
+        row.source_file_id = file.file_id
+    elif row.source_file_id == file.file_id:
+        row.base, row.pay_frequency = 0, None
 
 
 def _apply_asset(db: Session, file: File, values: dict[str, Extraction]) -> None:
