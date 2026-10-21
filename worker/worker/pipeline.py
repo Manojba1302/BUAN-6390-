@@ -53,7 +53,7 @@ def classify(document: dict, selected_type: str) -> dict:
     Pages that disagree mean the file holds more than one document, which we
     flag rather than tagging twelve pages as one W-2.
     """
-    per_page, evidence, readable = _classify_pages(document["pages"][:6])     # six is plenty
+    per_page, evidence, readable = _classify_pages(document["pages"][:config.classify_pages])
     if not per_page:
         return _result(selected_type, doc_types.UNKNOWN, False, [], False)
 
@@ -68,18 +68,26 @@ def _classify_pages(pages: list[dict]) -> tuple[list[str], list[str], bool]:
     per_page: list[str] = []
     evidence: list[str] = []
     readable = False
+    failures: list[str] = []
     for index, page in enumerate(pages):
         text = page.get("text") or ""
         if len(text.strip()) >= MIN_OCR_CHARS:
             readable = True
-        model_type, found = _ask_model(page, text)
+        model_type, found = _ask_model(page, text, failures)
         per_page.append(doc_types.reconcile(model_type, doc_types.regex_vote(text)))
         if index == 0:
             evidence = found
+    _raise_if_model_down(per_page, failures)
     return per_page, evidence, readable
 
 
-def _ask_model(page: dict, text: str) -> tuple[str, list[str]]:
+def _raise_if_model_down(per_page: list[str], failures: list[str]) -> None:
+    """Every call failing is an outage, not an unknown document. Say so."""
+    if per_page and len(failures) == len(per_page) and set(per_page) == {doc_types.UNKNOWN}:
+        raise ollama.OllamaError(f"classification model unavailable: {failures[0]}")
+
+
+def _ask_model(page: dict, text: str, failures: list[str]) -> tuple[str, list[str]]:
     prompt = doc_types.classification_prompt()
     images = [page["image"]] if page.get("image") else None
     if text.strip():
@@ -89,7 +97,8 @@ def _ask_model(page: dict, text: str) -> tuple[str, list[str]]:
     try:
         answer = ollama.generate_json(model=model, prompt=prompt, images=images, timeout=120.0)
     except ollama.OllamaError as exc:
-        log.warning("classification call failed: %s", exc)
+        log.warning("classification call failed (model %s): %s", model, exc)
+        failures.append(f"{model}: {exc}")
         return doc_types.UNKNOWN, []
 
     detected = str(answer.get("document_type", doc_types.UNKNOWN)).strip().lower()

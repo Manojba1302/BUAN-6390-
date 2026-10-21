@@ -26,6 +26,9 @@ class Config:
     chunk_chars = int(os.getenv("CHUNK_CHARS", "1200"))
     chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "150"))
     max_attempts = int(os.getenv("MAX_ATTEMPTS", "3"))
+    # Each page classified is one model call (10-60 s on a laptop). Page 1 sets
+    # the type; the rest only catch stapled-together documents.
+    classify_pages = int(os.getenv("CLASSIFY_PAGES", "3"))
 
 
 config = Config()
