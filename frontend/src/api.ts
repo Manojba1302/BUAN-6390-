@@ -7,7 +7,7 @@ import type {
 export interface ChatReply {
   answer: string; document_links?: {file_id: string; original_name: string}[];
   citations: {file_id: string; page: number}[];
-  evidence: {file_id: string; original_name: string; page: number}[];
+  evidence?: {file_id: string; original_name: string; page: number}[];
 }
 export interface SavedChatTurn {
   turn_id: string; question: string; reply: ChatReply | null; error: string | null;

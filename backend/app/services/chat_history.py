@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy import select
 from app.db.models import ChatConversation, ChatTurn, Extraction, File
-from app.services import document_answers
+from app.services import document_answers, chat_privacy
 
 
 def owned(db, customer, conversation_id, lock=False):
@@ -20,6 +20,36 @@ def owned(db, customer, conversation_id, lock=False):
 
 def turns(db, conversation):
     return db.scalars(select(ChatTurn).where(ChatTurn.conversation_id == conversation.conversation_id).order_by(ChatTurn.created_at, ChatTurn.turn_id)).all()
+
+
+def _context_rows(db, conversation, limit):
+    return db.scalars(
+        select(ChatTurn)
+        .where(
+            ChatTurn.conversation_id == conversation.conversation_id,
+            ChatTurn.status == "completed",
+        )
+        .order_by(ChatTurn.created_at.desc(), ChatTurn.turn_id.desc())
+        .limit(limit)
+    ).all()
+
+
+def recent_context(db, conversation, limit=3):
+    """Return recent completed turns as context, never as factual evidence."""
+    if limit <= 0:
+        return []
+    context = []
+    for row in reversed(_context_rows(db, conversation, limit)):
+        reply = row.reply if isinstance(row.reply, dict) else {}
+        answer = reply.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            continue
+        context.append({
+            "question": chat_privacy.redact_text(row.question),
+            "answer": chat_privacy.redact_text(answer),
+        })
+    return context
+
 
 
 def fingerprint(db, file):
@@ -49,22 +79,45 @@ def source_status(db, customer, application_id, versions):
         else:
             result[file_id] = "current"
     return result
+        
+
+def _turn_error(row, expired):
+    if expired:
+        return "This request did not finish. Please ask again."
+    return chat_privacy.redact_text(row.error) if row.error else None
 
 
 def serialise(db, customer, conversation, row):
-    expired = row.status == "pending" and (datetime.now(timezone.utc) - row.created_at).total_seconds() > 180
-    return {"turn_id": str(row.turn_id), "question": row.question, "reply": row.reply,
-            "status": "failed" if expired else row.status,
-            "error": "This request did not finish. Please ask again." if expired else row.error,
-            "source_status": source_status(db, customer, conversation.application_id, row.source_versions),
-            "created_at": row.created_at.isoformat()}
+    expired = (
+        row.status == "pending"
+        and (datetime.now(timezone.utc) - row.created_at).total_seconds() > 180
+    )
+    safe_reply = (
+        chat_privacy.protect_chat_response(row.reply)
+        if row.reply is not None
+        else None
+    )
+    return {
+        "turn_id": str(row.turn_id),
+        "question": chat_privacy.redact_text(row.question),
+        "reply": safe_reply,
+        "status": "failed" if expired else row.status,
+        "error": _turn_error(row, expired),
+        "source_status": source_status(
+            db, customer, conversation.application_id, row.source_versions
+        ),
+        "created_at": row.created_at.isoformat(),
+    }
 
 
 def begin(db, conversation, question):
     pending = db.scalar(select(ChatTurn).where(ChatTurn.conversation_id == conversation.conversation_id, ChatTurn.status == "pending").order_by(ChatTurn.created_at.desc()))
     if pending and (datetime.now(timezone.utc) - pending.created_at).total_seconds() < 180:
         raise HTTPException(409, "An answer is still being prepared in this conversation")
-    row = ChatTurn(conversation_id=conversation.conversation_id, question=question.strip())
+    row = ChatTurn(
+    conversation_id=conversation.conversation_id,
+    question=chat_privacy.redact_text(question.strip()),
+)
     db.add(row)
     conversation.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -75,7 +128,8 @@ def finish(db, customer, turn_id, reply=None, error=None):
     row = db.get(ChatTurn, turn_id)
     if row is None:
         raise HTTPException(410, "This conversation was deleted")
-    row.reply, row.error = reply, error
+    row.reply = chat_privacy.protect_chat_response(reply) if reply is not None else None
+    row.error = chat_privacy.redact_text(error) if error else None
     row.status = "failed" if error else "completed"
     row.source_versions = source_versions(db, customer, reply) if reply else {}
     row.completed_at = datetime.now(timezone.utc)

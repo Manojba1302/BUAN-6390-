@@ -45,18 +45,41 @@ def delete(conversation_id: UUID, db: Session = Depends(get_db), customer: Custo
     conversation = chat_history.owned(db, customer, conversation_id)
     db.delete(conversation); db.commit()
 
+
+def _send_reply(
+    db: Session,
+    customer: Customer,
+    conversation,
+    question: str,
+    clarification,
+    context: list[dict],
+    turn_id: UUID,
+) -> None:
+    try:
+        reply = clarification or chat.ask(
+            chat.Ask(question=question, application_id=conversation.application_id),
+            db,
+            customer,
+            context=context,
+        )
+        chat_history.finish(db, customer, turn_id, reply=reply)
+    except HTTPException as exc:
+        chat_history.finish(db, customer, turn_id, error=str(exc.detail))
+        raise
+
+
 @router.post("/{conversation_id}/messages")
 def send(conversation_id: UUID, body: Message, db: Session = Depends(get_db), customer: Customer = Depends(current_customer)):
     if not body.question.strip():
         raise HTTPException(400, "Ask a question")
     conversation = chat_history.owned(db, customer, conversation_id, lock=True)
+    context = chat_history.recent_context(db, conversation, limit=3)
     question, clarification = chat_history.follow_up(db, customer, conversation, body.question)
     row = chat_history.begin(db, conversation, body.question)
-    turn_id = row.turn_id
-    try:
-        reply = clarification or chat.ask(chat.Ask(question=question, application_id=conversation.application_id), db, customer)
-        chat_history.finish(db, customer, turn_id, reply=reply)
-    except HTTPException as exc:
-        chat_history.finish(db, customer, turn_id, error=str(exc.detail))
-        raise
-    return chat_history.serialise(db, customer, conversation, db.get(type(row), turn_id))
+    _send_reply(
+        db, customer, conversation, question,
+        clarification, context, row.turn_id,
+    )
+    return chat_history.serialise(
+        db, customer, conversation, db.get(type(row), row.turn_id)
+    )
