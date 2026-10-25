@@ -27,4 +27,18 @@ def recover(tag, pages):
         if total is not None:
             section = "Account summary" + text.split("Account summary", 1)[1].split("Ending balance", 1)[0]
             candidates[total] = {"value": total, "normalized": total, "quote": section.strip(), "page": page.get("page"), "method": page.get("method")}
-    return {"total_withdrawals": next(iter(candidates.values()))} if len(candidates) == 1 else {}
+    result = {"total_withdrawals": next(iter(candidates.values()))} if len(candidates) == 1 else {}
+    mask = account_mask(pages)
+    if mask:
+        result["account_mask"] = mask
+    return result
+
+
+def account_mask(pages):
+    candidates={}
+    for page in pages:
+        for match in re.finditer(r"\baccount\s+(?:number|no\.?)\s*:\s*([0-9xX*•][0-9xX*• -]{3,35})",page.get("text", ""),re.I):
+            digits=re.sub(r"\D","",match[1])
+            if len(digits)>=4:
+                candidates[digits[-4:]]={"value":"****"+digits[-4:],"normalized":"****"+digits[-4:],"quote":digits[-4:],"page":page.get("page"),"method":page.get("method")}
+    return next(iter(candidates.values())) if len(candidates)==1 else None

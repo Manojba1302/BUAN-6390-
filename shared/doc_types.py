@@ -89,3 +89,16 @@ def reconcile(model_type: str, regex_type: str | None) -> str:
     if model_type == UNKNOWN:
         return regex_type
     return model_type if model_type == regex_type else UNKNOWN
+
+
+def classification_generation() -> dict:
+    """Bound both classification stages to a small typed response."""
+    properties = {
+        "document_type": {"type": "string", "enum": [*type_ids(), UNKNOWN]},
+        "readable": {"type": "boolean"},
+        "evidence": {"type": "array", "maxItems": 2, "items": {"type": "string", "maxLength": 100}},
+        "mixed_document": {"type": "boolean"},
+    }
+    return {"options": {"num_ctx": 4096, "num_predict": 256},
+            "response_schema": {"type": "object", "properties": properties,
+                                "required": list(properties), "additionalProperties": False}}

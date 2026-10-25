@@ -10,3 +10,7 @@ boto3==1.35.84
 httpx==0.28.1
 pillow==11.0.0
 pymupdf==1.25.1
+
+langgraph==1.2.16
+reportlab==5.0.1
+cryptography==43.0.3

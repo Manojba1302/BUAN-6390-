@@ -43,7 +43,8 @@
         "overtime_pay": "Explicit current-period overtime earnings amount, only if separately labelled.",
         "bonus_pay": "Explicit current-period bonus amount, only if separately labelled.",
         "total_deductions": "Explicit current-period total deductions, preserving cents. Never use year-to-date amounts and never infer this from gross minus net. Null if not printed.",
-        "federal_withholding": "Explicit current-period federal income tax withholding, preserving cents. Never use year-to-date amounts. Null if not separately printed."
+        "federal_withholding": "Explicit current-period federal income tax withholding, preserving cents. Never use year-to-date amounts. Null if not separately printed.",
+        "employer_address": "Employer or company street address, city, state and ZIP code, as printed. Null if not printed."
       },
       "optional_extract": [
         "regular_pay",
@@ -53,7 +54,8 @@
         "pay_rate",
         "pay_rate_basis",
         "total_deductions",
-        "federal_withholding"
+        "federal_withholding",
+        "employer_address"
       ]
     },
     {
@@ -87,8 +89,12 @@
         "address": "The employee's mailing street address including unit, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
         "city": "The employee's mailing city, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
         "state": "The employee's mailing state, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
-        "zip": "The employee's mailing ZIP code, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts."
-      }
+        "zip": "The employee's mailing ZIP code, only when explicitly printed. Do not use an employer or financial institution address; do not infer missing parts.",
+        "employer_address": "Employer street address, city, state and ZIP code from box c, as printed. Null if not printed."
+      },
+      "optional_extract": [
+        "employer_address"
+      ]
     },
     {
       "id": "bank_statement",
@@ -111,7 +117,7 @@
       "extract": {
         "account_holder": "Name the account is held in",
         "institution": "Name of the bank or credit union",
-        "account_mask": "Last four digits of the account number only, as ****1234",
+        "account_mask": "Last four digits copied from the printed account number, prefixed with four asterisks. Return null if no account number is printed; never invent digits.",
         "period_start": "First day of the statement period, YYYY-MM-DD",
         "period_end": "Last day of the statement period, YYYY-MM-DD",
         "beginning_balance": "Opening balance, numeric amount, preserving all decimal cents exactly as printed (e.g. 11799.50), without currency symbols or commas",
@@ -127,7 +133,7 @@
     {
       "id": "drivers_license",
       "display_name": "Driver's license",
-      "definition": "A state-issued driver licence card bearing a portrait, a licence number and an expiry date.",
+      "definition": "A state-issued driver license card bearing a portrait, a license number and an expiry date.",
       "signals": [
         "a US state name across the top",
         "the words DRIVER LICENSE or DRIVER'S LICENSE",

@@ -29,4 +29,24 @@ class NamePrefillTests(unittest.TestCase):
         self.assertEqual(field.review_state,"proposed")
         self.assertEqual(field.value,"Example")
 
+class AccountDefaultTests(unittest.TestCase):
+    def _run(self, existing):
+        from app.api.v1.applications import _account_defaults
+        from app.db.models import Application, Customer
+        db = Mock(); db.scalars.return_value.all.return_value = existing
+        app = Application(application_id=uuid.uuid4())
+        customer = Customer(email="a@example.test", first_name="Ada", last_name="Lovelace")
+        return _account_defaults(db, app, customer), {c.args[0].field_name: c.args[0].value for c in db.add.call_args_list}
+
+    def test_new_application_starts_with_signup_name_and_email(self):
+        added, values = self._run([])
+        self.assertTrue(added)
+        self.assertEqual(values, {"firstName": "Ada", "lastName": "Lovelace", "email": "a@example.test"})
+
+    def test_existing_answers_are_never_overwritten(self):
+        added, values = self._run(["firstName", "lastName", "email"])
+        self.assertFalse(added)
+        self.assertEqual(values, {})
+
+
 if __name__ == "__main__": unittest.main()

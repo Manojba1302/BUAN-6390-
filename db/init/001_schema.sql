@@ -222,7 +222,7 @@ INSERT INTO checklist_requirement (document_tag, display_name, required_count, g
  ('paystub',          'Pay stub',             2, 'Your two most recent pay stubs',          1),
  ('w2',               'W-2',                  2, 'W-2s for the two most recent tax years',          2),
  ('bank_statement',   'Bank statement',       2, 'Two months for each account you are using',3),
- ('drivers_license',  'Driver''s license',    1, 'Front of your current licence',           4),
+ ('drivers_license',  'Driver''s license',    1, 'Front of your current license',           4),
  ('ssn_card',         'Social Security card', 1, 'A clear photo of the card',               5);
 
 CREATE OR REPLACE FUNCTION touch_application() RETURNS trigger AS $$

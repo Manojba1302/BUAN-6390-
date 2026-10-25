@@ -46,6 +46,7 @@ def create_application(db: Session = Depends(get_db),
     app = Application(customer_id=customer.customer_id)
     db.add(app)
     db.flush()
+    _account_defaults(db, app, customer)
     audit.record(db, action="application.created",
                  customer_id=customer.customer_id, application_id=app.application_id)
     db.commit()
@@ -66,8 +67,31 @@ def list_applications(db: Session = Depends(get_db),
 def get_application(application_id: UUID, db: Session = Depends(get_db),
                     customer: Customer = Depends(current_customer)) -> dict:
     app = _owned(db, application_id, customer)
+    if app.status == "draft" and _account_defaults(db, app, customer):
+        db.commit()
     prefill_service.apply_pending(db, application_id=app.application_id)
     return _serialise(db, app)
+
+
+ACCOUNT_FIELDS = {"firstName": "first_name", "lastName": "last_name", "email": "email"}
+
+
+def _account_defaults(db: Session, app: Application, customer: Customer) -> bool:
+    """Start the form with the name and email given at sign-up.
+
+    Only fields the application has never had are filled, so anything the
+    customer typed, cleared or chose from a document is left alone.
+    """
+    existing = set(db.scalars(select(ApplicationField.field_name).where(
+        ApplicationField.application_id == app.application_id,
+        ApplicationField.field_name.in_(ACCOUNT_FIELDS))).all())
+    added = False
+    for field, attribute in ACCOUNT_FIELDS.items():
+        value = (getattr(customer, attribute) or "").strip()
+        if field not in existing and value:
+            db.add(ApplicationField(application_id=app.application_id, field_name=field, value=value, source="user", review_state="confirmed"))
+            added = True
+    return added
 
 
 @router.patch("/{application_id}")

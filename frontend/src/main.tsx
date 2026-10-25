@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { ToastHost } from "./ui";
+import "@fontsource-variable/lexend";
+import "@fontsource-variable/fraunces";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -17,3 +19,5 @@ createRoot(root).render(
 );
 import "./homeflow.css";
 import "./bank-layout.css";
+
+import "./typography.css";

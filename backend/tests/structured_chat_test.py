@@ -67,3 +67,13 @@ class StructuredChatTests(unittest.TestCase):
         self.assertIn("semimonthly", result["answer"])
         self.assertIn("reason cannot be determined", result["answer"])
         self.assertNotIn("1923.76", result["answer"])
+
+    def test_name_comparison_lists_values_without_ownership_inference(self):
+        self._file("drivers_license",full_name="Alex Example")
+        self._file("w2",employee_name="Jordan Sample")
+        result = self.ask("Compare names on my driving license and W-2")
+        self.assertIn("Alex Example",result["answer"])
+        self.assertIn("Jordan Sample",result["answer"])
+        self.assertIn("printed names differ",result["answer"])
+        self.assertIn("do not establish document ownership",result["answer"])
+        self.assertEqual(len(result["citations"]),2)

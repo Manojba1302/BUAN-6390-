@@ -7,6 +7,11 @@ import { CATEGORY_ICON, Icon } from "./icons";
 import { useToast } from "./ui";
 import type { ChecklistItem, DocumentSummary, StagedFile } from "./types";
 
+const TYPE_LABELS: Record<string, string> = {
+  w2: "W-2", paystub: "Pay stub", bank_statement: "Bank statement", drivers_license: "Driver's license",
+  ssn_card: "Social Security card", other: "Other document", unknown: "Not recognised",
+};
+
 interface Props {
   applicationId: string;
   checklist: ChecklistItem[];
@@ -23,6 +28,7 @@ export function DocumentsStep(props: Props) {
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [busy, setBusy] = useState(false);
+  const [stored, setStored] = useState<Record<string,{id:string;status:string;application?:string|null}>>({});
   const [showVault, setShowVault] = useState(false);
   const uploader = useRef<HTMLDialogElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -60,7 +66,7 @@ export function DocumentsStep(props: Props) {
 
   }
 
-  const ready = staged.filter(s => s.status === "local" || s.status === "error" || s.result?.outcome === "failed" || (s.status === "done" && (s.result?.outcome === "matched" || s.kept)));
+  const ready = staged.filter(s => !stored[s.id]).filter(s => s.status === "local" || s.status === "error" || s.result?.outcome === "failed" || (s.status === "done" && (s.result?.outcome === "matched" || s.kept)));
 
   async function upload() {
     if (!ready.length || busy) return;
@@ -69,14 +75,24 @@ export function DocumentsStep(props: Props) {
     for (const item of ready) {
       try {
         let result = item.result;
-        if (!result || result.outcome === "failed") {
+        if (!item.kept && (!result || result.outcome === "failed")) {
           setStaged(xs => xs.map(x => x.id === item.id ? {...x,status:"checking"} : x));
           result = await api.classify(item.file,item.cat);
           setStaged(xs => xs.map(x => x.id === item.id ? {...x,status:"done",result} : x));
         }
-        if (result.outcome !== "matched" && !item.kept) continue;
+        if (!item.kept && result?.outcome !== "matched") continue;
         const res = await api.upload(item.file,item.cat,applicationId,item.kept);
-        if (res.message) { toast(res.message); continue; }
+        if (res.duplicate_of && res.application_id === applicationId) {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+          setStaged(xs => xs.filter(x => x.id !== item.id));
+          done += 1;
+          continue;
+        }
+        if (res.duplicate_of) {
+          setStored(xs => ({...xs,[item.id]:{id:res.file_id,status:res.status,application:res.application_id}}));
+          toast("This file is already saved. Review its stored copy below.");onUploaded();continue;
+        }
+        if (res.message) {toast(res.message);continue;}
         if(item.previewUrl) URL.revokeObjectURL(item.previewUrl);
         setStaged(xs => xs.filter(x => x.id !== item.id));
         done += 1;
@@ -86,12 +102,12 @@ export function DocumentsStep(props: Props) {
       }
     }
     setBusy(false);
-    if(done){toast(`${done} file${done>1?"s":""} saved and queued`,"ok");onUploaded();if(done === staged.length) setActiveCat(null);}
+    if(done){toast(`${done} file${done>1?"s":""} added to this application`,"ok");onUploaded();if(done === staged.length) setActiveCat(null);}
   }
 
   function discard() {
     staged.forEach((s) => s.previewUrl && URL.revokeObjectURL(s.previewUrl));
-    setStaged([]);
+    setStaged([]);setStored({});
   }
 
   return (
@@ -201,6 +217,7 @@ export function DocumentsStep(props: Props) {
             </div>
           )}
 
+          {Object.entries(stored).map(([id,copy]) => <div className="banner" role="status" key={id}><Icon name="info"/><div><b>Already saved - no new upload needed</b><p>{copy.application && copy.application !== applicationId ? "This file is linked to another application; it has not been moved." : copy.application ? "This file is already attached to this application." : "This file is in My Vault. Choose it from My Vault to attach it here."} {copy.status === "failed" ? "Reading failed. Open it and choose Retry reading." : ["queued","processing"].includes(copy.status) ? "Reading is still in progress." : "Its extracted details are available to review."}</p><button type="button" className="btn sec" onClick={() => {setActiveCat(null);discard();onOpenDoc(copy.id);}}>Review stored file</button></div></div>)}
           {staged.length > 0 && (
             <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap", alignItems: "center" }}>
               <button className="btn" onClick={() => void upload()} disabled={!ready.length || busy}>
@@ -208,9 +225,9 @@ export function DocumentsStep(props: Props) {
                 {busy ? "Checking and saving…" : `Submit ${ready.length} file${ready.length === 1 ? "" : "s"}`}
               </button>
               <button className="btn sec" disabled={busy} onClick={discard}>Discard</button>
-              {staged.length > ready.length && (
+              {staged.filter(s=>!stored[s.id]).length > ready.length && (
                 <span className="footnote">
-                  {staged.length - ready.length} file{staged.length - ready.length > 1 ? "s" : ""}{" "}
+                  {staged.filter(s=>!stored[s.id]).length - ready.length} file{staged.length - ready.length > 1 ? "s" : ""}{" "}
                   {staged.some((s) => s.status === "checking") ? "being checked" : "need your confirmation"}
                 </span>
               )}
@@ -260,7 +277,7 @@ function StagedRow({ item, onKeep, onRemove, checklist, onCategory }: {
             : <Icon name={item.isPdf ? "file" : "image"} />}
         </span>
         <span className="meta">
-          <b>{item.name}</b><label className="f">Selected document type<select className="ctl" value={item.cat} disabled={item.status==="checking"} onChange={e=>onCategory(e.target.value)}>{checklist.map(c=><option key={c.document_tag} value={c.document_tag}>{c.display_name}</option>)}</select></label>{r && <p className="hint">Detected type: {r.detected_type}. Selected type: {item.cat}. Changing the type checks it again on Submit.</p>}
+          <b>{item.name}</b><label className="f">Selected document type<select className="ctl" value={item.cat} disabled={item.status==="checking"} onChange={e=>onCategory(e.target.value)}>{checklist.map(c=><option key={c.document_tag} value={c.document_tag}>{c.display_name}</option>)}</select></label>{r && <p className="hint">Detected type: {r.detected_type === "unknown" ? "not recognised" : checklist.find(c=>c.document_tag===r.detected_type)?.display_name ?? r.detected_type}. Selected type: {checklist.find(c=>c.document_tag===item.cat)?.display_name ?? item.cat}. Changing the type checks it again on Submit.</p>}
           <span className="sub">{bytes(item.size)} &middot; {item.isPdf ? "PDF" : "Image"} &middot; awaiting upload</span>
 
           {item.status === "local" && <p className="hint">Preview only · not sent to the server. AI detection starts after Submit.</p>}
@@ -290,7 +307,7 @@ function StagedRow({ item, onKeep, onRemove, checklist, onCategory }: {
                   Retake the photo on a flat surface, with no glare, and all four corners inside the frame.
                 </div>
               )}
-              {(r.outcome === "mismatched" || r.outcome === "unknown") && !item.kept && (
+              {(r.outcome === "mismatched" || r.outcome === "unknown" || r.outcome === "failed") && !item.kept && (
                 <div className="sitem-act">
                   <button className="btn sec" onClick={onRemove}>Choose a different file</button>
                   <button className="btn sec" onClick={onKeep}>Upload it anyway</button>
@@ -348,7 +365,7 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       <span className="vb">
         <b title={doc.original_name}>{doc.original_name}</b>
         <span>{doc.display_name} &middot; {bytes(doc.size_bytes)}</span>
-        {doc.classification && <span>AI detected: {doc.classification.detected_type.replaceAll("_", " ")}</span>}
+        {doc.classification && <span>AI detected: {TYPE_LABELS[doc.classification.detected_type] ?? doc.classification.detected_type.replaceAll("_", " ")}</span>}
         <span>{doc.extracted_field_count} fields read{doc.missing_field_count > 0 ? ` · ${doc.missing_field_count} missing` : ""}</span>
         <span style={{ display: "block", marginTop: 8 }}>{chip}</span>
       </span>

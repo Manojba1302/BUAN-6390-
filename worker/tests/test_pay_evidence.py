@@ -73,3 +73,20 @@ class PayEvidenceTests(unittest.TestCase):
             self.assertIn("Regular earnings: 961.88", result)
             self.assertNotIn("Regular earnings: 67.50", result)
             self.assertNotIn("Regular earnings: 13689.64", result)
+
+
+class SummaryCurrentColumnTests(unittest.TestCase):
+    def test_current_deductions_are_not_ytd_taxes(self):
+        import fitz
+        import pay_evidence
+        doc=fitz.open();page=doc.new_page()
+        headers=[(80,"TOTAL GROSS"),(170,"FED TAXABLE GROSS"),(280,"TOTAL TAXES"),(370,"TOTAL DEDUCTIONS"),(500,"NET PAY")]
+        for x,label in headers:
+            page.insert_text((x,100),label,fontsize=7)
+        page.insert_text((20,108),"Current",fontsize=7)
+        page.insert_text((20,116),"YTD",fontsize=7)
+        for x,value in [(100,"961.88"),(200,"961.88"),(300,"29.10"),(420,"0.00"),(520,"932.78")]:
+            page.insert_text((x,108),value,fontsize=7)
+        page.insert_text((300,116),"327.45",fontsize=7)
+        self.assertIn("Total deductions: 0.00",pay_evidence._summary_amounts(page,page.get_text("words")))
+        doc.close()

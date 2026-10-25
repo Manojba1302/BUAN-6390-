@@ -411,7 +411,7 @@ function Summary(props: StepProps) {
               {Object.entries(dictionary.fields).filter(([name, spec]) => spec.step === s.id && visible(spec, values) && values[name] && !spec.sensitive).map(([name, spec]) => <div className="kv" key={name}><span className="k">{spec.label}</span><span className="v">{spec.widget === "currency" ? money2(num(values[name])) : values[name]}</span></div>)}
               {s.missing.map((m) => (
                 <div className="kv" key={m}>
-                  <span className="k">{m}</span>
+                  <span className="k">{dictionary.fields[m]?.label ?? m}</span>
                   <span className="v missing">Still needed</span>
                 </div>
               ))}

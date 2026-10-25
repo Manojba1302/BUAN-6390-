@@ -60,5 +60,16 @@ export function maskSensitive(value: string): string {
   return "•".repeat(value.length - 4) + value.slice(-4);
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  ytd_gross: "Year-to-date gross pay", box1_wages: "Wages (W-2 box 1)", box2_federal_tax: "Federal tax withheld (W-2 box 2)",
+  employee_ssn: "Social Security number", ssn: "Social Security number", employer_ein: "Employer EIN", zip: "ZIP code",
+  account_mask: "Account number", institution: "Bank", date_of_birth: "Date of birth", dob: "Date of birth",
+};
+
 export const fieldLabelFromName = (name: string): string =>
-  name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  FIELD_LABELS[name] ?? name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+/** How a value was read, in customer words rather than pipeline method names. */
+export const sourceLabel = (method: string | null | undefined, hasQuote: boolean): string =>
+  method === "native_text" ? "Read from text" : method === "ocr" || method === "vision" ? "Read from image"
+    : method ? method : hasQuote ? "Saved document text" : "Your entry";

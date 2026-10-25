@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "./api";
-import { fieldLabelFromName, maskSensitive } from "./format";
+import { fieldLabelFromName, maskSensitive, sourceLabel } from "./format";
 import { Icon } from "./icons";
 import { useToast } from "./ui";
 import type { DocumentDetail } from "./types";
@@ -21,14 +21,45 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [names, setNames] = useState({first_name:"",last_name:""});
   const [saving, setSaving] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
     if (!fileId) { setDoc(null); return; }
+    setDoc(null);setNames({first_name:"",last_name:""});setRefreshError(false);
     setEdits({});
     setRevealed({});
-    api.document(fileId).then(d => {setDoc(d);setNames({first_name:d.extractions.find(e=>e.field_name==="first_name")?.value ?? "",last_name:d.extractions.find(e=>e.field_name==="last_name")?.value ?? ""});}).catch(() => toast("We could not open that document."));
+    let cancelled = false;
+    api.document(fileId).then(d => {if (cancelled) return;setDoc(d);setNames({first_name:d.extractions.find(e=>e.field_name==="first_name")?.value ?? "",last_name:d.extractions.find(e=>e.field_name==="last_name")?.value ?? ""});}).catch(() => {if (!cancelled) toast("We could not open that document.");});
+    return () => {cancelled = true;};
   }, [fileId, toast]);
+
+  useEffect(() => {
+    if (!fileId || !doc || !["queued","processing"].includes(doc.status)) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void api.document(fileId).then(next => {
+        if (cancelled) return;
+        setDoc(next);setRefreshError(false);
+        if (next.status === "completed") {
+          setNames({first_name:next.extractions.find(e=>e.field_name==="first_name")?.value ?? "",last_name:next.extractions.find(e=>e.field_name==="last_name")?.value ?? ""});
+          onSaved();
+        }
+      }).catch(() => {if (!cancelled) setRefreshError(true);});
+    }, 3000);
+    return () => {cancelled=true;window.clearInterval(timer);};
+  }, [fileId, doc?.status]);
+
+  async function retryProcessing() {
+    if (!doc || retrying) return;
+    const unsaved = Object.entries(edits).some(([id,value]) => value !== (doc.extractions.find(e => e.extraction_id === id)?.value ?? "")) || (["first_name","last_name"] as const).some(key => names[key] !== (doc.extractions.find(e => e.field_name === key)?.value ?? ""));
+    if (unsaved) {toast("Save your corrections before retrying.");return;}
+    setRetrying(true);
+    try {await api.retryDocument(doc.file_id);setDoc({...doc,status:"queued"});setRefreshError(false);onSaved();}
+    catch {toast("Could not restart document processing. Please try again.");}
+    finally {setRetrying(false);}
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -37,7 +68,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
   }, [onClose]);
 
   async function save() {
-    if (!doc) return;
+    if (!doc || doc.status !== "completed") return;
     const corrections = Object.entries(edits)
       .filter(([id, value]) => {
         const row = doc.extractions.find((e) => e.extraction_id === id);
@@ -46,11 +77,11 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
       .map(([extraction_id, value]) => ({ extraction_id, value }));
 
     const additions = Object.entries(names).filter(([field,value]) => value.trim() && !doc.extractions.some(e => e.field_name === field)).map(([field_name,value]) => ({field_name,value:value.trim()}));
-    if (!corrections.length && !additions.length) { onClose(); return; }
+    if (!corrections.length && !additions.length) { toast(doc.application_id ? "No changes to save. Your document is already saved." : "No changes to save. Your document is saved in My Vault.", "ok"); onClose(); return; }
     setSaving(true);
     try {
       await api.correct(doc.file_id, [...corrections,...additions]);
-      toast("Document review saved", "ok");
+      toast(doc.application_id ? "Corrections saved" : "Corrections saved in My Vault", "ok");
       onSaved();
       onClose();
     } catch {
@@ -61,6 +92,8 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
   }
 
   const open = Boolean(fileId);
+
+  const canRetry = !!doc && (doc.status === "failed" || (doc.status === "completed" && doc.document_tag === "w2" && doc.missing_fields.some(f => ["employee_name", "employer_name", "box1_wages"].includes(f))));
 
   return (
     <>
@@ -101,11 +134,14 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                     <Icon name="info" />
                     <div>
                       <b>{doc.status === "failed" ? "Document processing failed" : "Still being read"}</b>
-                      {doc.status === "failed" ? "We could not finish reading this document. Please retry processing." : "This page fills in as soon as the document has been processed."}
+                      {doc.status === "failed" ? "Reading this document did not finish. Your file is saved; you do not need to upload it again." : "Your file is saved. Extracted details will appear here when reading finishes."}
                     </div>
                   </div>
                 )}
 
+                {canRetry && doc.status === "completed" && <div className="missingbox" role="status"><b>Reading is incomplete</b><p>The document type matched, but key fields were not extracted. Select Retry reading below to read this saved file again.</p></div>}
+                {refreshError && <p role="status" className="hint">We could not check processing progress. Your file is saved; we will keep checking.</p>}
+                {doc.status === "completed" && <>
                 <section className="document-person-review" hidden={!(["drivers_license","w2","paystub","ssn_card"].includes(doc.document_tag) && (!doc.extractions.some(e=>e.field_name==="first_name") || !doc.extractions.some(e=>e.field_name==="last_name")))}>
                   {["drivers_license","w2","paystub","ssn_card"].includes(doc.document_tag) && (!doc.extractions.some(e=>e.field_name==="first_name") || !doc.extractions.some(e=>e.field_name==="last_name")) && <>
                     <h3>Confirm the name parts</h3>
@@ -122,8 +158,8 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                   return (
                     <div className="fieldrow" key={row.extraction_id}>
                       <div className="fr-top">
-                        <b>{fieldLabelFromName(row.field_name)}</b>
-                        <span className="chip n">{row.method === "native_text" ? "text" : row.method ?? (row.evidence_quote ? "saved document text" : "user entry")}</span>
+                        <b id={`field-${row.extraction_id}`}>{fieldLabelFromName(row.field_name)}</b>
+                        <span className="chip n">{sourceLabel(row.method, !!row.evidence_quote)}</span>
                         {row.review_state === "corrected" && <span className="chip a">corrected</span>}
                         {sensitive && (
                           <button className="xbtn" aria-label="Show value"
@@ -134,6 +170,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                         )}
                       </div>
                       <input className={`ctl ${sensitive && !revealed[row.extraction_id] ? "mask" : ""}`}
+                             aria-labelledby={`field-${row.extraction_id}`}
                              value={display}
                              readOnly={sensitive && !revealed[row.extraction_id]}
                              onChange={(e) => setEdits((x) =>
@@ -158,8 +195,10 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                   </div>
                 )}
 
+                </>}
                 <div className="review-savebar">
-                  <button className="btn" onClick={() => void save()} disabled={saving}>
+                  {canRetry && <button type="button" className="btn" disabled={retrying} onClick={() => void retryProcessing()}>{retrying ? "Restarting..." : "Retry reading"}</button>}
+                  <button className={canRetry ? "btn sec" : "btn"} onClick={() => void save()} disabled={saving || doc.status !== "completed"}>
                     {saving ? "Saving" : "Save corrections"}
                   </button>
                   <button className="btn sec" onClick={onClose}>Close</button>

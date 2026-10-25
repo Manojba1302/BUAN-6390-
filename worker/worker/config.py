@@ -27,6 +27,10 @@ class Config:
     chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "150"))
     max_attempts = int(os.getenv("MAX_ATTEMPTS", "3"))
 
+    # How long Ollama keeps the document model loaded after a call. Keeping it for a few
+    # minutes avoids reloading it for every page; "0" unloads immediately (old behaviour).
+    model_keep_alive = (lambda v: 0 if v.strip() == "0" else v)(os.getenv("MODEL_KEEP_ALIVE", "2m"))
+
 
 config = Config()
 

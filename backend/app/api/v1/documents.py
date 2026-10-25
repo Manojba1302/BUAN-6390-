@@ -10,6 +10,7 @@ import money_values
 import doc_types
 from fastapi import APIRouter, Depends, File as UploadField, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
@@ -56,7 +57,7 @@ async def classify_only(
     as far as the application is concerned, and this is only advice."""
     body = await file.read()
     _check_upload(file, body, document_tag)
-    return classifier.classify(body=body, content_type=file.content_type,
+    return await run_in_threadpool(classifier.classify, body=body, content_type=file.content_type,
                                name=file.filename or "upload", selected_type=document_tag)
 
 
@@ -78,15 +79,13 @@ async def upload(
     existing = db.scalar(select(File).where(
         File.customer_id == customer.customer_id, File.checksum == storage.checksum(body)))
     if existing:
-        return {"file_id": str(existing.file_id), "status": existing.status,
-                "duplicate_of": str(existing.file_id),
-                "message": "You have already uploaded this file."}
+        return _reuse_upload(db, existing, application_id, customer)
     row = _store_file(db, customer, file, body, document_tag, application_id, logical_path)
     audit.record(db, action="document.uploaded", customer_id=customer.customer_id,
                  application_id=application_id, file_id=row.file_id,
                  payload={"document_tag": document_tag, "confirmed_mismatch": confirmed_mismatch})
     db.commit()
-    _queue_file(row)
+    _queue_file(db, row)
     return {"file_id": str(row.file_id), "status": row.status,
             "document_tag": row.document_tag, "original_name": row.original_name}
 
@@ -115,7 +114,7 @@ def _store_file(db: Session, customer: Customer, upload: UploadFile, body: bytes
     return row
 
 
-def _queue_file(row: File) -> None:
+def _queue_file(db: Session, row: File) -> None:
     """Hand the file to the worker. If the queue is down the file is still safe in storage."""
     try:
         queue.publish_extraction_job(
@@ -123,6 +122,8 @@ def _queue_file(row: File) -> None:
             file_id=row.file_id, document_tag=row.document_tag, trace_id=str(uuid.uuid4()))
     except Exception as exc:
         log.error("could not queue %s: %s", row.file_id, exc)
+        row.status, row.error_detail = "failed", "Could not start document processing. Please retry."
+        db.commit()
 
 
 @router.get("")
@@ -357,3 +358,40 @@ def _summary(db: Session, row: File) -> dict:
         "classification": _classification(cls),
         "has_markdown": md is not None,
     }
+
+
+@router.post("/{file_id}/retry", status_code=204)
+def retry_document(file_id: UUID, db: Session=Depends(get_db), customer: Customer=Depends(current_customer)):
+    row = db.scalar(select(File).where(File.file_id==file_id,File.customer_id==customer.customer_id).with_for_update())
+    if row is None:
+        raise HTTPException(404,"Document not found")
+    if not _retry_allowed(db, row):
+        raise HTTPException(409,"Only failed or incomplete W-2 documents can be retried")
+    row.status, row.error_detail, row.attempts = "queued", None, 0
+    db.commit()
+    try:
+        queue.publish_extraction_job(customer_id=row.customer_id,application_id=row.application_id,file_id=row.file_id,document_tag=row.document_tag,trace_id=str(uuid.uuid4()))
+    except Exception:
+        row.status, row.error_detail = "failed", "Could not queue processing"
+        db.commit()
+        raise HTTPException(503,"Could not restart document processing")
+
+
+def _retry_allowed(db, row):
+    if row.status == "failed":
+        return True
+    if row.status != "completed" or row.document_tag != "w2":
+        return False
+    rows = db.scalars(select(Extraction).where(Extraction.file_id == row.file_id)).all()
+    have = {e.field_name for e in rows if (e.corrected_value if e.corrected_value is not None else e.value_normalized or e.value_raw)}
+    return not {"employee_name", "employer_name", "box1_wages"}.issubset(have)
+
+
+def _reuse_upload(db, existing, application_id, customer):
+    # Pressing Upload for this application also authorizes reusing an owned vault copy.
+    if application_id and existing.application_id is None:
+        link_document(existing.file_id, LinkIn(application_id=application_id), db, customer)
+    return {"file_id": str(existing.file_id), "status": existing.status,
+            "duplicate_of": str(existing.file_id),
+            "application_id": str(existing.application_id) if existing.application_id else None,
+            "message": "Your existing file has been reused; no duplicate was uploaded."}

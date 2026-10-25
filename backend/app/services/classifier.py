@@ -23,6 +23,13 @@ log = logging.getLogger(__name__)
 
 def classify(*, body: bytes, content_type: str | None, name: str, selected_type: str) -> dict:
     started = time.perf_counter()
+    native = _native_classification(body, content_type, name, selected_type, started)
+    if native is not None:
+        return native
+    return _classify_model(body, content_type, name, selected_type, started)
+
+
+def _classify_model(body, content_type, name, selected_type, started):
     try:
         image = pages.first_page_image(body, content_type, name)
     except Exception as exc:
@@ -35,7 +42,7 @@ def classify(*, body: bytes, content_type: str | None, name: str, selected_type:
             model=settings.classifier_model,
             prompt=doc_types.classification_prompt(),
             images=[image],
-            timeout=settings.classifier_timeout_seconds,
+            timeout=settings.classifier_timeout_seconds, keep_alive=settings.model_keep_alive, **doc_types.classification_generation(),
         )
     except ollama.OllamaError as exc:
         log.warning("stage 1 model call failed: %s", exc)
@@ -100,3 +107,13 @@ def _message(outcome: str, selected: str, detected: str) -> str:
     if outcome == "unreadable":
         return "We could not read enough of this page."
     return "Something went wrong checking this file."
+
+
+def _native_classification(body, content_type, name, selected_type, started):
+    text = _page_one_text(body,content_type,name)
+    detected = doc_types.regex_vote(text) if len(text.strip()) >= 120 else None
+    if not detected:
+        return None
+    result = _result(selected_type,detected,True,["Document type identified from printed text signals"],started)
+    result["model"] = "native_text_rules"
+    return result

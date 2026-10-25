@@ -24,6 +24,13 @@ class EvidenceUnitTests(unittest.TestCase):
         answer["support"][0]["quote"]="Lease ends July 31."
         self.assertFalse(_supported_answer(answer,p)["citations"])
 
+    def test_quote_formatting_differences_are_accepted_but_values_are_not(self):
+        p=[{"file_id":"one","page":1,"original_name":"pay.pdf","content":"Gross Pay:   $13,748.14\nNet Pay: 932.78","saved_fields":[]}]
+        answer={"answer":"YTD 13748.14","citations":[{"file_id":"one","page":1}],"support":[{"file_id":"one","page":1,"quote":"gross pay: $13748.14"}]}
+        self.assertEqual(len(_supported_answer(answer,p)["citations"]),1)
+        answer["support"][0]["quote"]="Gross Pay: $13,748.15"
+        self.assertFalse(_supported_answer(answer,p)["citations"])
+
 @unittest.skipUnless(os.getenv("HOMEFLOW_DB_TEST")=="1","requires isolated database")
 class GeneralEvidenceTests(unittest.TestCase):
     setUp=postgres_test.DatabaseTests.setUp
@@ -45,6 +52,15 @@ class GeneralEvidenceTests(unittest.TestCase):
         self.assertTrue(chat_evidence.needs_general(self.db,self.customer,self.app_row.application_id,"When does my lease expire?"))
         self.assertFalse(chat_evidence.needs_general(self.db,self.customer,self.app_row.application_id,"When does my driving license expire?"))
         self.assertTrue(chat_evidence.retrieve(self.db,self.customer,self.app_row.application_id,"Please summarize my lease"))
+
+    def test_relevant_chunks_outrank_one_per_file_rotation(self):
+        lease=self._file("other")
+        for i,body in enumerate(("Lease rent is 1200 per month.","Lease deposit is 2400.","Lease ends June 30.")):
+            self.db.execute(text("INSERT INTO document_chunk(file_id,customer_id,chunk_index,page,content) VALUES(:f,:c,:i,:p,:t)"),{"f":lease.file_id,"c":lease.customer_id,"i":i,"p":i+1,"t":body})
+        other=self._file("other");self.chunk(other,"Unrelated insurance note about a lease clause",1)
+        self.db.commit()
+        found=chat_evidence.retrieve(self.db,self.customer,self.app_row.application_id,"lease rent per month")
+        self.assertEqual(found[0]["content"],"Lease rent is 1200 per month.")
 
     def test_unattached_and_other_customer_documents_are_excluded(self):
         f=self._file("other");f.application_id=None;self.db.commit();self.chunk(f,"Confidential lease contract")

@@ -6,6 +6,7 @@ photo does not, so it goes to the vision model as an image.
 from __future__ import annotations
 
 import io
+import re
 import logging
 
 log = logging.getLogger(__name__)
@@ -29,13 +30,13 @@ def page_count(body: bytes, content_type: str | None, name: str) -> int:
         return 1
 
 
-def native_text(body: bytes) -> list[str]:
+def native_text(body: bytes, *, layout: bool = False) -> list[str]:
     """Text per page, empty strings where a page carries none."""
     try:
         import fitz
         with fitz.open(stream=body, filetype="pdf") as doc:
             from pay_evidence import aligned_labels
-            return [(p.get_text("text") or "") + "\n" + aligned_labels(p) for p in doc]
+            return [re.sub(r"[ \t]+", " ", p.get_text("text", sort=layout) or "") + "\n" + aligned_labels(p) for p in doc]
     except Exception as exc:
         log.warning("native text failed: %s", exc)
         return []
@@ -85,18 +86,26 @@ def read_document(body: bytes, content_type: str | None, name: str) -> dict:
     """
     if not is_pdf(content_type, name):
         return {"pages": [{"text": "", "method": "vision",
-                           "image": normalise_image(body)}]}
+                           "image": normalise_image(body), "ocr_image": normalise_image(body, OCR_LONG_EDGE)}]}
 
     texts = native_text(body)
+    layouts = native_text(body, layout=True)
     if not texts:
-        return {"pages": [{"text": "", "method": "vision",
-                           "image": render_page(body, 0)}]}
+        return {"pages": [_scanned_page(body, 0, "")]}
 
     pages = []
     for i, text in enumerate(texts):
         if len(text.strip()) >= MIN_CHARS_FOR_NATIVE_TEXT:
-            pages.append({"text": text, "method": "native_text", "image": None})
+            pages.append({"text": text, "model_text": layouts[i], "method": "native_text", "image": None})
         else:
-            pages.append({"text": text, "method": "vision",
-                          "image": render_page(body, i)})
+            pages.append(_scanned_page(body, i, text))
     return {"pages": pages}
+
+
+# The vision model gets a small image; OCR needs roughly 200+ DPI to read small print reliably.
+OCR_LONG_EDGE = 2400
+
+
+def _scanned_page(body: bytes, index: int, text: str) -> dict:
+    return {"text": text, "method": "vision", "image": render_page(body, index),
+            "ocr_image": render_page(body, index, long_edge=OCR_LONG_EDGE)}
