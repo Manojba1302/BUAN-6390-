@@ -27,7 +27,7 @@ from app.services import chat_privacy
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-EMBED_MODEL = "nomic-embed-text"
+EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 ANSWER_MODEL = os.getenv("CHAT_MODEL", "llama3.1:8b")
 
 SOURCE_SCHEMA = {"type":"object","properties":{"file_id":{"type":"string"},"page":{"type":"integer"}},"required":["file_id","page"],"additionalProperties":False}
