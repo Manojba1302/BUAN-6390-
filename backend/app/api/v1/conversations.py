@@ -8,6 +8,7 @@ from app.core.security import current_customer
 from app.db.session import get_db
 from app.db.models import Customer, ChatConversation, ChatTurn
 from app.services import chat_history
+from app.services.chat_graph import build_chat_graph
 from app.api.v1 import chat
 
 router = APIRouter(prefix="/chat/conversations", tags=["chat"])
@@ -46,26 +47,36 @@ def delete(conversation_id: UUID, db: Session = Depends(get_db), customer: Custo
     db.delete(conversation); db.commit()
 
 
+def _run_chat_graph(db, customer, conversation, question, clarification, context):
+    def answer_question(text, history):
+        return chat.ask(
+            chat.Ask(question=text, application_id=conversation.application_id),
+            db, customer, context=history,
+        )
+
+    graph = build_chat_graph(answer_question)
+    return graph.invoke({
+        "question": question,
+        "context": context,
+        "clarification": clarification,
+        "reply": None,
+    })
+
+
 def _send_reply(
-    db: Session,
-    customer: Customer,
-    conversation,
-    question: str,
-    clarification,
-    context: list[dict],
-    turn_id: UUID,
+    db: Session, customer: Customer, conversation,
+    question: str, clarification, context: list[dict], turn_id: UUID,
 ) -> None:
     try:
-        reply = clarification or chat.ask(
-            chat.Ask(question=question, application_id=conversation.application_id),
-            db,
-            customer,
-            context=context,
+        result = _run_chat_graph(
+            db, customer, conversation, question, clarification, context,
         )
-        chat_history.finish(db, customer, turn_id, reply=reply)
+        chat_history.finish(db, customer, turn_id, reply=result["reply"])
     except HTTPException as exc:
         chat_history.finish(db, customer, turn_id, error=str(exc.detail))
         raise
+
+
 
 
 @router.post("/{conversation_id}/messages")
