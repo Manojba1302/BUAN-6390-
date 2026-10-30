@@ -34,7 +34,7 @@ def recover(db, file):
 
 def _save(db, file, rows, key, value):
     row = next((row for row in rows if row.field_name == key), None)
-    if row is not None and (row.corrected_value is not None or key != "total_withdrawals"):
+    if row is not None and (row.corrected_value is not None or key not in ("total_withdrawals", "account_mask")):
         return
     if row is None:
         row = Extraction(file_id=file.file_id, field_name=key, value_raw=value["value"], review_state="proposed")

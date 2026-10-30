@@ -1,11 +1,16 @@
 /** Local preview first; server classification starts only after Submit. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { api, ApiError } from "./api";
 import { bytes } from "./format";
 import { CATEGORY_ICON, Icon } from "./icons";
 import { useToast } from "./ui";
 import type { ChecklistItem, DocumentSummary, StagedFile } from "./types";
+
+const TYPE_LABELS: Record<string, string> = {
+  w2: "W-2", paystub: "Pay stub", bank_statement: "Bank statement", drivers_license: "Driver's license",
+  ssn_card: "Social Security card", other: "Other document", unknown: "Not recognised",
+};
 
 interface Props {
   applicationId: string;
@@ -14,15 +19,20 @@ interface Props {
   vaultDocuments: DocumentSummary[];
   onUploaded: () => void;
   onOpenDoc: (fileId: string) => void;
+  /** Replaces the plain step heading, e.g. with the dark step header. */
+  header?: ReactNode;
 }
 
 type CatState = { have: number; need: number; flagged: boolean; satisfied: boolean };
+
+export const DOCUMENTS_LEDE = "Choose what a file is before you pick it, so we can tell you straight away if something looks wrong. Preview stays on your device until you press Submit. We then check the document type and save accepted files.";
 
 export function DocumentsStep(props: Props) {
   const { applicationId, checklist, documents, onUploaded, onOpenDoc } = props;
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [busy, setBusy] = useState(false);
+  const [stored, setStored] = useState<Record<string,{id:string;status:string;application?:string|null}>>({});
   const [showVault, setShowVault] = useState(false);
   const uploader = useRef<HTMLDialogElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -60,7 +70,7 @@ export function DocumentsStep(props: Props) {
 
   }
 
-  const ready = staged.filter(s => s.status === "local" || s.status === "error" || s.result?.outcome === "failed" || (s.status === "done" && (s.result?.outcome === "matched" || s.kept)));
+  const ready = staged.filter(s => !stored[s.id]).filter(s => s.status === "local" || s.status === "error" || s.result?.outcome === "failed" || (s.status === "done" && (s.result?.outcome === "matched" || s.kept)));
 
   async function upload() {
     if (!ready.length || busy) return;
@@ -69,14 +79,24 @@ export function DocumentsStep(props: Props) {
     for (const item of ready) {
       try {
         let result = item.result;
-        if (!result || result.outcome === "failed") {
+        if (!item.kept && (!result || result.outcome === "failed")) {
           setStaged(xs => xs.map(x => x.id === item.id ? {...x,status:"checking"} : x));
           result = await api.classify(item.file,item.cat);
           setStaged(xs => xs.map(x => x.id === item.id ? {...x,status:"done",result} : x));
         }
-        if (result.outcome !== "matched" && !item.kept) continue;
+        if (!item.kept && result?.outcome !== "matched") continue;
         const res = await api.upload(item.file,item.cat,applicationId,item.kept);
-        if (res.message) { toast(res.message); continue; }
+        if (res.duplicate_of && res.application_id === applicationId) {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+          setStaged(xs => xs.filter(x => x.id !== item.id));
+          done += 1;
+          continue;
+        }
+        if (res.duplicate_of) {
+          setStored(xs => ({...xs,[item.id]:{id:res.file_id,status:res.status,application:res.application_id}}));
+          toast("This file is already saved. Review its stored copy below.");onUploaded();continue;
+        }
+        if (res.message) {toast(res.message);continue;}
         if(item.previewUrl) URL.revokeObjectURL(item.previewUrl);
         setStaged(xs => xs.filter(x => x.id !== item.id));
         done += 1;
@@ -86,48 +106,49 @@ export function DocumentsStep(props: Props) {
       }
     }
     setBusy(false);
-    if(done){toast(`${done} file${done>1?"s":""} saved and queued`,"ok");onUploaded();if(done === staged.length) setActiveCat(null);}
+    if(done){toast(`${done} file${done>1?"s":""} added to this application`,"ok");onUploaded();if(done === staged.length) setActiveCat(null);}
   }
 
   function discard() {
     staged.forEach((s) => s.previewUrl && URL.revokeObjectURL(s.previewUrl));
-    setStaged([]);
+    setStaged([]);setStored({});
   }
 
   return (
     <>
-      <p className="eyebrow">Step 2</p>
-      <h1 className="h1">Your documents</h1>
-      <p className="lede">
-        Choose what a file is before you pick it, so we can tell you straight away if something
-        looks wrong. Preview stays on your device until you press Submit. We then check the document type and save accepted files.
-      </p>
+      {props.header ?? <>
+        <p className="eyebrow">Step 2</p>
+        <h1 className="h1">Your documents</h1>
+        <p className="lede">{DOCUMENTS_LEDE}</p>
+      </>}
       <ol className="upload-guide" aria-label="Upload steps">
         <li><span>1</span>Choose document type</li>
         <li><span>2</span>Preview your file</li>
         <li><span>3</span>Upload and review</li>
       </ol>
 
-      {missing.length ? (
-        <div className="banner w">
-          <Icon name="alert" />
-          <div>
-            <b>{missing.length} document type{missing.length > 1 ? "s" : ""} still needed</b>
-            {missing.map((m) => m.display_name).join(", ")}. We cannot review your application without them.
-          </div>
-        </div>
-      ) : (
-        <div className="banner">
-          <Icon name="check" />
-          <div>
-            <b>Requested file counts received</b>
-            Review the dates and pages too. File counts alone do not verify statement periods or completeness.
-          </div>
-        </div>
-      )}
 
-      <section className="card">
-        <h2>What we need</h2><p className="document-period-note">For the supplied W-2 purchase workflow: two latest paystubs, two years of W-2s and two months of statements for each bank account. Your loan team may request updates.</p>
+      <section className="card need-card">
+        {(() => {
+          const requiredTypes = checklist.filter((c) => c.required_count > 0).length;
+          const doneTypes = requiredTypes - missing.length;
+          const pct = requiredTypes ? Math.round((doneTypes / requiredTypes) * 100) : 100;
+          return (
+            <div className={`need-head ${missing.length ? "" : "done"}`}>
+              <div className="need-copy">
+                <h2>What we need</h2>
+                <p role="status">{missing.length
+                  ? <><b>{missing.length} to go</b> before we can review your application.</>
+                  : <><b>Every requested document is here.</b> Review the dates and pages too. File counts alone do not verify statement periods or completeness.</>}</p>
+              </div>
+              <span className="need-ring" style={{ "--v": pct } as CSSProperties} role="img"
+                    aria-label={`${doneTypes} of ${requiredTypes} required document types complete`}>
+                <span>{missing.length ? <>{doneTypes}<small>/{requiredTypes}</small></> : <Icon name="check" />}</span>
+              </span>
+            </div>
+          );
+        })()}
+        <p className="document-period-note">For the supplied W-2 purchase workflow: two latest paystubs, two years of W-2s and two months of statements for each bank account. Your loan team may request updates.</p>
         <p className="hint">
           PDF, JPG, PNG or HEIC. Up to 20 MB each. A photo from your phone is fine if every
           corner is in frame.
@@ -136,9 +157,11 @@ export function DocumentsStep(props: Props) {
           {checklist.map((c) => {
             const s = state(c.document_tag);
             const cls = s.flagged ? "warn" : s.satisfied ? "ok" : "";
+            const fill = s.have ? "has" : s.need ? "needed" : "optional";
             return (
-              <button key={c.document_tag} className={`doctile ${cls}`}
+              <button key={c.document_tag} className={`doctile ${cls} ${fill} doctype-${c.document_tag}`}
                       onClick={() => { setActiveCat(c.document_tag); discard(); }}>
+                <span className="tile-art" aria-hidden="true">{s.have ? <TileArt tag={c.document_tag} /> : <Icon name="plus" />}</span>
                 <span className="ti"><Icon name={CATEGORY_ICON[c.document_tag] ?? "doc"} /></span>
                 <span className="tt">
                   <b>{c.display_name}</b>
@@ -201,6 +224,7 @@ export function DocumentsStep(props: Props) {
             </div>
           )}
 
+          {Object.entries(stored).map(([id,copy]) => <div className="banner" role="status" key={id}><Icon name="info"/><div><b>Already saved - no new upload needed</b><p>{copy.application && copy.application !== applicationId ? "This file is linked to another application; it has not been moved." : copy.application ? "This file is already attached to this application." : "This file is in My Vault. Choose it from My Vault to attach it here."} {copy.status === "failed" ? "Reading failed. Open it and choose Retry reading." : ["queued","processing"].includes(copy.status) ? "Reading is still in progress." : "Its extracted details are available to review."}</p><button type="button" className="btn sec" onClick={() => {setActiveCat(null);discard();onOpenDoc(copy.id);}}>Review stored file</button></div></div>)}
           {staged.length > 0 && (
             <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap", alignItems: "center" }}>
               <button className="btn" onClick={() => void upload()} disabled={!ready.length || busy}>
@@ -208,9 +232,9 @@ export function DocumentsStep(props: Props) {
                 {busy ? "Checking and saving…" : `Submit ${ready.length} file${ready.length === 1 ? "" : "s"}`}
               </button>
               <button className="btn sec" disabled={busy} onClick={discard}>Discard</button>
-              {staged.length > ready.length && (
+              {staged.filter(s=>!stored[s.id]).length > ready.length && (
                 <span className="footnote">
-                  {staged.length - ready.length} file{staged.length - ready.length > 1 ? "s" : ""}{" "}
+                  {staged.filter(s=>!stored[s.id]).length - ready.length} file{staged.length - ready.length > 1 ? "s" : ""}{" "}
                   {staged.some((s) => s.status === "checking") ? "being checked" : "need your confirmation"}
                 </span>
               )}
@@ -260,7 +284,7 @@ function StagedRow({ item, onKeep, onRemove, checklist, onCategory }: {
             : <Icon name={item.isPdf ? "file" : "image"} />}
         </span>
         <span className="meta">
-          <b>{item.name}</b><label className="f">Selected document type<select className="ctl" value={item.cat} disabled={item.status==="checking"} onChange={e=>onCategory(e.target.value)}>{checklist.map(c=><option key={c.document_tag} value={c.document_tag}>{c.display_name}</option>)}</select></label>{r && <p className="hint">Detected type: {r.detected_type}. Selected type: {item.cat}. Changing the type checks it again on Submit.</p>}
+          <b>{item.name}</b><label className="f">Selected document type<select className="ctl" value={item.cat} disabled={item.status==="checking"} onChange={e=>onCategory(e.target.value)}>{checklist.map(c=><option key={c.document_tag} value={c.document_tag}>{c.display_name}</option>)}</select></label>{r && <p className="hint">Detected type: {r.detected_type === "unknown" ? "not recognised" : checklist.find(c=>c.document_tag===r.detected_type)?.display_name ?? r.detected_type}. Selected type: {checklist.find(c=>c.document_tag===item.cat)?.display_name ?? item.cat}. Changing the type checks it again on Submit.</p>}
           <span className="sub">{bytes(item.size)} &middot; {item.isPdf ? "PDF" : "Image"} &middot; awaiting upload</span>
 
           {item.status === "local" && <p className="hint">Preview only · not sent to the server. AI detection starts after Submit.</p>}
@@ -290,7 +314,7 @@ function StagedRow({ item, onKeep, onRemove, checklist, onCategory }: {
                   Retake the photo on a flat surface, with no glare, and all four corners inside the frame.
                 </div>
               )}
-              {(r.outcome === "mismatched" || r.outcome === "unknown") && !item.kept && (
+              {(r.outcome === "mismatched" || r.outcome === "unknown" || r.outcome === "failed") && !item.kept && (
                 <div className="sitem-act">
                   <button className="btn sec" onClick={onRemove}>Choose a different file</button>
                   <button className="btn sec" onClick={onKeep}>Upload it anyway</button>
@@ -336,7 +360,7 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       : doc.status === "completed" && doc.missing_field_count > 0
       ? <span className="chip w"><Icon name="alert" />Fields need review</span>
       : outcome === "matched"
-      ? <span className="chip g"><Icon name="check" />Type matched</span>
+      ? <span className="chip g"><Icon name="check" />Document type matched</span>
       : outcome
       ? <span className="chip w"><Icon name="alert" />Needs a look</span>
       : <span className="chip n">Stored</span>;
@@ -348,7 +372,7 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       <span className="vb">
         <b title={doc.original_name}>{doc.original_name}</b>
         <span>{doc.display_name} &middot; {bytes(doc.size_bytes)}</span>
-        {doc.classification && <span>AI detected: {doc.classification.detected_type.replaceAll("_", " ")}</span>}
+        {doc.classification && <span>AI detected: {TYPE_LABELS[doc.classification.detected_type] ?? doc.classification.detected_type.replaceAll("_", " ")}</span>}
         <span>{doc.extracted_field_count} fields read{doc.missing_field_count > 0 ? ` · ${doc.missing_field_count} missing` : ""}</span>
         <span style={{ display: "block", marginTop: 8 }}>{chip}</span>
       </span>
@@ -363,5 +387,32 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       {locked && <small className="hint">Linked to a submitted application</small>}
     </div>}
     </div>
+  );
+}
+
+/** Small drawing of each document type, shown on its tile once a file is in. */
+function TileArt({ tag }: { tag: string }) {
+  if (tag === "drivers_license" || tag === "ssn_card") {
+    return (
+      <svg width="96" height="64" viewBox="0 0 96 64" fill="none">
+        <rect x="1" y="1" width="94" height="62" rx="9" fill="#fff" stroke="#a9d9c2" strokeWidth="1.5" />
+        {tag === "drivers_license" ? <circle cx="24" cy="26" r="10" fill="#d8f3e6" /> : <rect x="14" y="16" width="20" height="20" rx="4" fill="#d8f3e6" />}
+        <rect x="44" y="18" width="38" height="5" rx="2.5" fill="#0e6b5c" />
+        <rect x="44" y="28" width="26" height="4" rx="2" fill="#d5e3dc" />
+        <rect x="14" y="46" width="68" height="4" rx="2" fill="#d5e3dc" />
+      </svg>
+    );
+  }
+  const accent = tag === "w2" ? <><rect x="11" y="11" width="16" height="10" rx="2" fill="#0e6b5c" /><rect x="30" y="11" width="15" height="10" rx="2" fill="#d8f3e6" /></>
+    : tag === "bank_statement" ? <><rect x="11" y="11" width="22" height="5" rx="2.5" fill="#0e6b5c" /><rect x="11" y="48" width="34" height="7" rx="3.5" fill="#c9f27b" /></>
+    : <><rect x="11" y="11" width="26" height="5" rx="2.5" fill="#0e6b5c" /><rect x="11" y="52" width="18" height="6" rx="3" fill="#c9f27b" /></>;
+  return (
+    <svg width="56" height="74" viewBox="0 0 56 74" fill="none">
+      <rect x="1" y="1" width="54" height="72" rx="7" fill="#fff" stroke="#a9d9c2" strokeWidth="1.5" />
+      {accent}
+      <rect x="11" y="27" width="34" height="4" rx="2" fill="#d5e3dc" />
+      <rect x="11" y="35" width="30" height="4" rx="2" fill="#d5e3dc" />
+      {tag !== "bank_statement" && <rect x="11" y="43" width="34" height="4" rx="2" fill="#d5e3dc" />}
+    </svg>
   );
 }

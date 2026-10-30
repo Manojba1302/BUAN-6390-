@@ -114,3 +114,80 @@ class BankFieldsTests(unittest.TestCase):
     def test_unqualified_deposits_and_withdrawals_are_not_omitted(self):
         keys, tags = intent("What are the opening balance, closing balance, deposits, and withdrawals on my bank statement?")
         self.assertTrue({"beginning_balance", "ending_balance", "total_deposits", "total_withdrawals"}.issubset(keys))
+
+
+TEST_KEY = "Hn4dJ6mE0b0p3I2y8wq5mG9yXo4cWw3dQvU7d1h2Y_k="
+
+
+class FieldEncryptionUnitTests(unittest.TestCase):
+    def tearDown(self):
+        import field_crypto
+        field_crypto._cipher.cache_clear()
+
+    def test_round_trip_only_for_identifier_fields_and_only_with_a_key(self):
+        import field_crypto
+        with patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": ""}):
+            field_crypto._cipher.cache_clear()
+            self.assertEqual(field_crypto.encrypt("ssn", "123-45-6789"), "123-45-6789")
+        with patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": TEST_KEY}):
+            field_crypto._cipher.cache_clear()
+            secret = field_crypto.encrypt("ssn", "123-45-6789")
+            self.assertTrue(secret.startswith("enc:v1:"))
+            self.assertNotIn("6789", secret)
+            self.assertEqual(field_crypto.decrypt(secret), "123-45-6789")
+            self.assertEqual(field_crypto.encrypt("gross_pay", "961.88"), "961.88")
+            self.assertEqual(field_crypto.encrypt("ssn", secret), secret)
+            self.assertEqual(field_crypto.decrypt("plain old value"), "plain old value")
+
+
+@unittest.skipUnless(os.getenv("HOMEFLOW_DB_TEST") == "1", "requires isolated PostgreSQL")
+class FieldEncryptionDatabaseTests(unittest.TestCase):
+    setUp = postgres_test.DatabaseTests.setUp
+    _file = postgres_test.DatabaseTests._file
+
+    def tearDown(self):
+        import field_crypto
+        postgres_test.DatabaseTests.tearDown(self)
+        field_crypto._cipher.cache_clear()
+
+    def test_identifiers_are_ciphertext_in_the_database_and_plain_in_the_app(self):
+        import field_crypto
+        from sqlalchemy import text
+        with patch.dict(os.environ, {"FIELD_ENCRYPTION_KEY": TEST_KEY}):
+            field_crypto._cipher.cache_clear()
+            file = self._file("w2", employee_ssn="123-45-6789", employer_name="Example Employer")
+            stored = dict(self.db.execute(text("SELECT field_name, value_raw FROM extraction WHERE file_id=:f"), {"f": file.file_id}).all())
+            self.assertTrue(stored["employee_ssn"].startswith("enc:v1:"))
+            self.assertEqual(stored["employer_name"], "Example Employer")
+            self.db.expire_all()
+            row = self.db.scalar(select(Extraction).where(Extraction.file_id == file.file_id, Extraction.field_name == "employee_ssn"))
+            self.assertEqual(row.value_raw, "123-45-6789")
+            with patch.object(chat.ollama, "embed", side_effect=AssertionError("must not call model")):
+                answer = self.client.post("/api/v1/chat", json={"question": "What is my SSN?", "application_id": str(self.app_row.application_id)}).json()["answer"]
+            self.assertIn("6789", answer)
+            self.assertNotIn("enc:v1", answer)
+            self.assertNotIn("123-45-6789", answer)
+
+
+class EvaluationFindingsTests(unittest.TestCase):
+    def test_location_phrasings_route_to_employer_address(self):
+        for question in ("wheres my employeer located", "where's my company", "What is my employers location?"):
+            self.assertIn("employer_address", intent(question)[0])
+
+    def test_gross_pay_with_printed_frequency_gives_monthly_estimate(self):
+        from app.services.document_answers import _monthly_lines
+        file = Mock(original_name="pay.pdf")
+        found = {k: Extraction(field_name=k, value_raw=v) for k, v in {"gross_pay": "2500.00", "pay_frequency": "biweekly"}.items()}
+        self.assertIn("5,416.67", _monthly_lines(file, found)[0])
+
+
+class EmployerLocationAndMonthlyTests(unittest.TestCase):
+    def test_location_phrasings_route_to_employer_address(self):
+        for question in ("wheres my employeer located", "where's my company", "What is my employers location?", "Where is my employer?"):
+            self.assertEqual(intent(question)[0], ("employer_name", "employer_address"))
+
+    def test_gross_pay_with_printed_frequency_gives_monthly_estimate(self):
+        from app.services.document_answers import _monthly_lines
+        file = Mock(original_name="pay.pdf")
+        found = {k: Extraction(field_name=k, value_raw=v) for k, v in (("gross_pay", "2500.00"), ("pay_frequency", "biweekly"))}
+        self.assertIn("5,416.67", _monthly_lines(file, found)[0])

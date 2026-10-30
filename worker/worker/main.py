@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 import pika
@@ -51,6 +52,9 @@ def _claim(file_id: str) -> dict | None:
         if record is None:
             log.warning("file %s is gone, dropping the job", file_id)
             return None
+        if record.get("status") == "completed":
+            log.info("file %s already completed, dropping duplicate job", file_id)
+            return None
         attempts = db.bump_attempts(conn, file_id)
         db.set_status(conn, file_id, "processing")
     if attempts > config.max_attempts:
@@ -81,6 +85,7 @@ def _extract_fields(file_id: str, document: dict, record: dict, classification: 
     if classification["outcome"] not in ("matched", "mismatched"):
         return {}
     fields = pipeline.extract(document, record["document_tag"])
+    _validate_extraction(record["document_tag"], fields)
     log.info("file %s: %s fields extracted", file_id, len(fields))
     return fields
 
@@ -123,7 +128,7 @@ def on_message(channel, method, _properties, body) -> None:
         return
 
     try:
-        handle(job)
+        _handle_with_heartbeats(channel, job)
         channel.basic_ack(method.delivery_tag)
     except Exception as exc:
         log.exception("job failed: %s", exc)
@@ -133,6 +138,16 @@ def on_message(channel, method, _properties, body) -> None:
         except Exception:
             log.exception("could not record the failure")
         channel.basic_ack(method.delivery_tag)     # the row says failed; no poison loop
+
+
+
+def _handle_with_heartbeats(channel, job):
+    """Keep Pika I/O on its owning thread during blocking model calls."""
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(handle, job)
+        while not future.done():
+            channel.connection.process_data_events(time_limit=1)
+        future.result()
 
 
 def main() -> None:
@@ -148,6 +163,17 @@ def main() -> None:
         except pika.exceptions.AMQPError as exc:
             log.warning("queue connection lost (%s), retrying in 5s", exc)
             time.sleep(5)
+
+
+
+def _validate_extraction(tag, fields):
+    """A recognized W-2 must yield usable identity and wage evidence."""
+    if tag != "w2":
+        return
+    required = ("employee_name", "employer_name", "box1_wages")
+    missing = [key for key in required if not str((fields.get(key) or {}).get("value") or "").strip()]
+    if missing:
+        raise RuntimeError("Incomplete W-2 extraction; could not read: " + ", ".join(missing) + ". Retry reading or upload a clearer document.")
 
 
 if __name__ == "__main__":

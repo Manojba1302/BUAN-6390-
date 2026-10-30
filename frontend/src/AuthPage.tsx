@@ -42,7 +42,7 @@ export function AuthPage({onAuthenticated}:{onAuthenticated:(user:CustomerProfil
   return <div className="entry-layout">
     <aside className="entry-photo">
       <div className="entry-brand"><Icon name="homeflow"/><div>HomeFlow<small>Your path home</small></div></div>
-      <div className="entry-story"><span className="entry-kicker">A place to call yours</span><h2>Big plans.<br/>A simpler path home.</h2><p>Your application, documents and next steps. Together.</p></div>
+      <div className="entry-story"><span className="entry-kicker">A place to call yours</span><h2>Big plans.<br/>A simpler path home.</h2><p>Apply, upload your documents and see what comes next, all in one place.</p></div>
       <img className="entry-home" src="/homeflow-family-home.png" alt="A family approaching their American-style home"/>
       <div className="entry-caption"><Icon name="home"/><span>From the first step to your front door.</span></div>
     </aside>

@@ -6,9 +6,16 @@ photo does not, so it goes to the vision model as an image.
 from __future__ import annotations
 
 import io
+import re
 import logging
 
 log = logging.getLogger(__name__)
+
+try:   # iPhone photos arrive as HEIC; Pillow opens them only with this plugin installed
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    log.info("pillow-heif not installed: HEIC photos cannot be read")
 
 MIN_CHARS_FOR_NATIVE_TEXT = 120   # below this a "text" PDF is really a scan
 
@@ -29,13 +36,13 @@ def page_count(body: bytes, content_type: str | None, name: str) -> int:
         return 1
 
 
-def native_text(body: bytes) -> list[str]:
+def native_text(body: bytes, *, layout: bool = False) -> list[str]:
     """Text per page, empty strings where a page carries none."""
     try:
         import fitz
         with fitz.open(stream=body, filetype="pdf") as doc:
             from pay_evidence import aligned_labels
-            return [(p.get_text("text") or "") + "\n" + aligned_labels(p) for p in doc]
+            return [re.sub(r"[ \t]+", " ", p.get_text("text", sort=layout) or "") + "\n" + aligned_labels(p) for p in doc]
     except Exception as exc:
         log.warning("native text failed: %s", exc)
         return []
@@ -52,8 +59,11 @@ def render_page(body: bytes, page_index: int = 0, long_edge: int = 1100) -> byte
         return pix.tobytes("png")
 
 
-def normalise_image(body: bytes, long_edge: int = 1100) -> bytes:
-    """Downscale a phone photo and drop its EXIF rotation."""
+def normalise_image(body: bytes, long_edge: int = 1100, min_edge: int = 0) -> bytes:
+    """Downscale a phone photo and drop its EXIF rotation.
+
+    min_edge enlarges a small photo (WhatsApp sends about 1024 px) so OCR can read small print.
+    """
     try:
         from PIL import Image, ImageOps
         img = Image.open(io.BytesIO(body))
@@ -61,6 +71,9 @@ def normalise_image(body: bytes, long_edge: int = 1100) -> bytes:
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
         img.thumbnail((long_edge, long_edge))
+        if min_edge and max(img.size) < min_edge:
+            scale = min_edge / max(img.size)
+            img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
         out = io.BytesIO()
         img.save(out, format="PNG")
         return out.getvalue()
@@ -85,18 +98,30 @@ def read_document(body: bytes, content_type: str | None, name: str) -> dict:
     """
     if not is_pdf(content_type, name):
         return {"pages": [{"text": "", "method": "vision",
-                           "image": normalise_image(body)}]}
+                           "image": normalise_image(body),
+                           "ocr_image": normalise_image(body, OCR_LONG_EDGE, OCR_MIN_PHOTO_EDGE)}]}
 
     texts = native_text(body)
+    layouts = native_text(body, layout=True)
     if not texts:
-        return {"pages": [{"text": "", "method": "vision",
-                           "image": render_page(body, 0)}]}
+        return {"pages": [_scanned_page(body, 0, "")]}
 
     pages = []
     for i, text in enumerate(texts):
         if len(text.strip()) >= MIN_CHARS_FOR_NATIVE_TEXT:
-            pages.append({"text": text, "method": "native_text", "image": None})
+            pages.append({"text": text, "model_text": layouts[i], "method": "native_text", "image": None})
         else:
-            pages.append({"text": text, "method": "vision",
-                          "image": render_page(body, i)})
+            pages.append(_scanned_page(body, i, text))
     return {"pages": pages}
+
+
+# The vision model gets a small image; OCR needs roughly 200+ DPI to read small print reliably.
+OCR_LONG_EDGE = 2400
+# A phone photo smaller than this is enlarged before OCR; past about 1600 px a small photo
+# only gets blurrier and OCR confidence drops again.
+OCR_MIN_PHOTO_EDGE = 1600
+
+
+def _scanned_page(body: bytes, index: int, text: str) -> dict:
+    return {"text": text, "method": "vision", "image": render_page(body, index),
+            "ocr_image": render_page(body, index, long_edge=OCR_LONG_EDGE)}

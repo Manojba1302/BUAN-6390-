@@ -17,32 +17,33 @@ Vijay asked for, and it is what we read from in the demo.
 
 ## Models
 
-| Role | Model | Size | Where it runs | Budget |
+What `.env` runs today (all local through Ollama, on CPU):
+
+| Role | Model | Size | Where it runs | Notes |
 | --- | --- | --- | --- | --- |
-| Stage 1 classification | `llama3.2-vision:11b` | 11B | API request path | target under 2 seconds (not verified) |
-| Stage 2 classification | `llama3.2-vision:11b` | 11B | Worker | seconds |
-| Extraction | `llama3.1:8b` | 8B | Worker | target up to a minute (not verified) |
-| Embeddings | `nomic-embed-text` | 137M | Worker | milliseconds, 768 dimensions |
+| Stage 1 classification | `qwen2.5vl:3b` | 3B | API request path | Small vision model; checks the document type only, persists nothing |
+| Stage 2 classification | `qwen2.5vl:3b` | 3B | Worker | Writes `file_classification`, the record of truth |
+| Extraction | `qwen2.5vl:3b` | 3B | Worker | Same small model as classification to fit laptop CPUs; the meeting plan was a larger extraction model (`llama3.1:8b` is the fallback default) |
+| OCR | Tesseract 5 | n/a | Worker | Reads photos and scans; values from the model are checked against this text |
+| Embeddings | `nomic-embed-text` | 137M | Worker and API | 768 dimensions in pgvector; changing it needs a full re-index |
+| Chat answers | `llama3.1:8b` (default `CHAT_MODEL`) | 8B | API | Optional: OpenRouter for chat generation only (`CHAT_PROVIDER=openrouter`); documents and embeddings stay local |
 
 Pull them once:
 
 ```
-docker compose --profile models exec ollama ollama pull llama3.2-vision:11b
-docker compose --profile models exec ollama ollama pull llama3.1:8b
-docker compose --profile models exec ollama ollama pull nomic-embed-text
+ollama pull qwen2.5vl:3b
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
 ```
-
-A smaller stage 1 model is worth testing (`moondream`, `qwen2.5vl:3b`) if 11B is
-too slow on a laptop. The budget matters more than the size: the customer is
-watching that spinner.
 
 ## Python packages
 
 Backend: fastapi, uvicorn, sqlalchemy 2, psycopg 3, pydantic 2, pydantic-settings,
-python-multipart, pika, boto3, httpx, pillow, pymupdf.
+python-multipart, pika, boto3, httpx, pillow, pillow-heif, pymupdf, langgraph (chat
+session memory), reportlab (PDF generation from Markdown templates), cryptography.
 
-Worker: sqlalchemy 2, psycopg 3, pika, boto3, httpx, pillow, pymupdf, pytesseract
-(with the `tesseract-ocr` system package).
+Worker: sqlalchemy 2, psycopg 3, pika, boto3, httpx, pillow, pillow-heif (iPhone HEIC
+photos), pymupdf, pytesseract (with the `tesseract-ocr` system package), cryptography.
 
 ## Front-end packages
 
@@ -66,4 +67,12 @@ nothing fights us on the look.
 ## Authentication
 Password accounts use salted scrypt hashes and opaque, revocable HttpOnly cookie sessions. Reset links are single-use and expire after 30 minutes. Mailpit v1.27 receives local reset emails; HTTPS and real SMTP are required for deployment. Email-only development authentication has been removed.
 
+## Encryption at rest
+`FIELD_ENCRYPTION_KEY` (a Fernet key) encrypts SSN, license and account numbers and dates of birth in
+the extraction and application tables. Without it those values are stored in plain text. Document
+text in `document_chunk` and the Markdown files is not encrypted.
 
+## Re-reading a document
+Uploading the same file again reuses the stored copy and does not read it again. A failed read, or a
+completed read missing key fields (for example a license number), offers Retry reading in the review
+panel, which queues the saved file again. Customer corrections are kept.

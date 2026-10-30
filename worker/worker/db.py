@@ -9,6 +9,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import create_engine, text
 
+import field_crypto
 from worker.config import config
 
 engine = create_engine(config.database_url, pool_pre_ping=True, future=True)
@@ -79,10 +80,13 @@ def save_extraction(conn, file_id: str, field: str, payload: dict, model: str) -
         INSERT INTO extraction
             (file_id, field_name, value_raw, value_normalized, page,
              evidence_quote, method, model_name)
-        VALUES (CAST(:id AS uuid), :field, :raw, :norm, :page, :quote, :method, :model)
-    """), {"id": file_id, "field": field, "raw": payload.get("value"),
-           "norm": payload.get("normalized"), "page": payload.get("page"),
-           "quote": payload.get("quote"), "method": payload.get("method"),
+        SELECT CAST(:id AS uuid), :field, :raw, :norm, :page, :quote, :method, :model
+        WHERE NOT EXISTS (SELECT 1 FROM extraction
+            WHERE file_id = CAST(:id AS uuid) AND field_name = :field
+              AND review_state <> 'proposed')
+    """), {"id": file_id, "field": field, "raw": field_crypto.encrypt(field, payload.get("value")),
+           "norm": field_crypto.encrypt(field, payload.get("normalized")), "page": payload.get("page"),
+           "quote": field_crypto.encrypt(field, payload.get("quote")), "method": payload.get("method"),
            "model": model})
 
 

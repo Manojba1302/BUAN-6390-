@@ -429,3 +429,17 @@ Exact tools support explicitly named pairs of extracted amounts (sum or absolute
 Model evaluation remains ongoing. With compact synthetic unfamiliar lease/insurance evidence, the 3B candidate returned quote-supported answers in 8–9 seconds. Larger real summaries still timed out or failed support checks, and the retained 8B default timed out even on a small lease example on this CPU. These limitations remain; the new architecture must not be described as guaranteeing broad question answering or as an approved 3B model switch.
 
 Final general-pipeline checks: 60 backend tests and 30 worker tests passed; TypeScript/Vite build passed. An end-to-end isolated test confirmed that `When does my lease expire?` uses an Other document's text rather than a license expiry fast path, even with embeddings offline. The installed `gemma3:4b` candidate answered the short unfamiliar insurance example in 36.3 seconds but timed out on the real pay-slip summary; it was not adopted. No existing customer records were reset or migrated for this change.
+
+
+### Chat session and typography update (October 17)
+Chat opens a new active conversation; closing resets active context. History remains available separately, and messages send a session context cutoff so historical references are not silently reused. New history omits raw document passages and applies targeted identifier/email redaction; legacy stored rows are not rewritten. See `docs/vijay-chat-requirements.md` for limitations and evaluation results. Chat generation logs first-token and total time server-side; validated answers are still delivered as a complete response.
+
+Typography uses locally bundled `@fontsource-variable/lexend` and `@fontsource-variable/fraunces`, inspired by treasury.sh. Run `npm ci` in frontend after pulling, or rebuild its Docker image. No external font service receives customer browsing requests.
+
+
+### Metadata-only chat evaluation lake
+Optional evaluation logging now writes to a separate private MinIO bucket without question/answer text or raw customer/document identifiers. It records routing, source pseudonyms, available retrieval scores, model configuration and stage timings. Enable with `CHAT_EVALUATION_ENABLED=true` and a dedicated `CHAT_EVALUATION_HMAC_KEY` in your untracked environment, then recreate the backend. See `docs/chat-evaluation-lake.md` for retention, privacy and best-effort delivery limitations. Generate a daily report with `docker compose exec backend python -m scripts.summarize_chat_evaluations --date YYYY-MM-DD`. Outcome counts measure system behavior, not model correctness.
+
+
+### Synthetic chat quality checks
+`backend/scripts/run_chat_quality.py` runs authored fact/source checks on isolated synthetic documents. Nine deterministic cases run by default; `--live-model` enables four general RAG/model cases. The runner requires a disposable PostgreSQL database named `review` and never uses customer records. See `docs/chat-quality-evaluation.md` for setup, recorded results and grading limits. Passing these checks is not proof of production LLM accuracy.

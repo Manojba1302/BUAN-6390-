@@ -126,3 +126,28 @@ body{background-image:linear-gradient(#dce9f045,#dce9f045),url('/homeflow-family
 .document-upload-dialog .rep-head{position:sticky;top:-26px;background:#f8fbfd;z-index:2;padding:12px 0}
 .document-upload-dialog .drop{padding:22px}.document-upload-dialog .local-document-preview object{height:320px}
 @media(max-width:720px){.document-upload-dialog>.card{padding:18px}.document-upload-dialog .local-document-preview object{height:250px}}
+
+/* Sign-in card on the right. The photo is mirrored so the family walks on the
+   left, beside the headline, and stays unobstructed by the account form. */
+@media(min-width:721px){
+  .entry-layout{grid-template-columns:minmax(0,1.3fr) minmax(400px, .9fr);background:#183d52}
+  .entry-layout::before,.entry-layout::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none}
+  .entry-layout::before{background:url('/homeflow-family-home.png') right center/cover no-repeat;transform:scaleX(-1)}
+  .entry-layout::after{background:linear-gradient(90deg,rgba(14,48,66,.64),rgba(25,59,76,.18))}
+  .entry-layout>.main{grid-column:2;grid-row:1;padding:36px 48px 36px 24px;justify-content:center}
+  .entry-photo{grid-column:1;grid-row:1;min-height:100vh;padding:28px 48px 48px;justify-content:flex-start;gap:20px}
+  .entry-brand{position:static}
+  .entry-story{margin:44px 0 0;max-width:440px;text-shadow:0 2px 18px #092c4c80}
+  .entry-story h2{font-size:clamp(32px,3vw,48px)}
+  .entry-story{max-width:580px}
+  .entry-story p{max-width:400px}
+  .entry-caption{display:none}
+  .auth-content{max-width:440px}
+}
+@media(max-width:720px){
+  .entry-layout{background-position:72% top}
+  .entry-photo{min-height:250px;justify-content:flex-start;background:linear-gradient(180deg,#12354c70,transparent)}
+  .entry-brand{position:static}
+}
+@media(min-width:721px){.entry-photo{position:static}}
+@media(max-width:720px){.entry-photo{min-height:300px;background:linear-gradient(180deg,#12354c80,transparent 60%),url('/homeflow-family-home.png') 75% 65%/cover no-repeat}}

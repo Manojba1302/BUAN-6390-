@@ -4,13 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, auth, ApiError } from "./api";
 import { AuthPage } from "./AuthPage";
 import type { CustomerProfile } from "./api";
+import { TemplateDocuments } from "./TemplateDocuments";
 import { DocumentChat } from "./DocumentChat";
 import { DocDrawer } from "./DocDrawer";
-import { DocCard, DocumentsStep } from "./Documents";
+import { DocCard, DocumentsStep, DOCUMENTS_LEDE } from "./Documents";
 import { validate } from "./format";
 import { Icon } from "./icons";
 import { FormStep, type Provenance } from "./Steps";
-import { FootNav, Rail, useToast } from "./ui";
+import { FootNav, Rail, StepHero, useToast } from "./ui";
 import type {
   ApplicationState, ChecklistItem, Dictionary, DocumentSummary, Progress, NameSuggestion, AddressSuggestion, EmploymentSuggestion,
 } from "./types";
@@ -38,6 +39,9 @@ export function App() {
   const [openDoc, setOpenDoc] = useState<string | null>(null);
   const [vaultOpen, setVaultOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatStarted, setChatStarted] = useState(false);
+  const [chatUnread, setChatUnread] = useState(false);
+  const [templateOpen,setTemplateOpen] = useState(false);
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [user, setUser] = useState<CustomerProfile | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -220,7 +224,9 @@ export function App() {
         const result = await api.submit(appId);
         setSubmitted(result.reference);
       } catch (err) {
-        toast(err instanceof ApiError ? err.message : "We could not submit the application.");
+        const missing = err instanceof ApiError ? ((err.detail as {detail?: {missing?: string[]}} | null)?.detail?.missing ?? []) : [];
+        toast(missing.length ? `Before you submit, we still need: ${missing.slice(0, 6).join(", ")}${missing.length > 6 ? ` and ${missing.length - 6} more` : ""}.`
+          : err instanceof ApiError ? err.message : "We could not submit the application.");
       }
       return;
     }
@@ -301,8 +307,21 @@ export function App() {
                   <div className="profile-account-reference"><small>Account reference</small><p className="profile-reference">{customerId || user.customer_id}</p></div>
                 </div>
               </details>
+              {appId && (() => {
+                const reference = `HF-${appId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+                return (
+                  <div className="profile-app-id">
+                    <span><small>Application ID</small><strong>{reference}</strong></span>
+                    <button type="button" onClick={async () => {
+                      try { await navigator.clipboard.writeText(reference); toast("Application ID copied", "ok"); }
+                      catch { toast(`Could not copy. Your application ID is ${reference}.`); }
+                    }}><Icon name="copy" />Copy</button>
+                  </div>
+                );
+              })()}
               <button className="profile-action" onClick={e => { e.currentTarget.closest("details")?.removeAttribute("open"); void goTo(2); }}><Icon name="user" /><span>Personal information</span><Icon name="chevron" /></button>
               <button className="profile-action" onClick={async e => { const menu = e.currentTarget.closest("details"); if (dirty.current && !(await save())) return; setVaultOpen(true); menu?.removeAttribute("open"); }}><Icon name="folder" /><span>My vault</span><Icon name="chevron" /></button>
+              <button className="profile-action" onClick={async e=>{const menu=e.currentTarget.closest("details");if(dirty.current&&!(await save()))return;menu?.removeAttribute("open");setTemplateOpen(true);}}><Icon name="doc"/><span>Generate document (POC)</span><Icon name="chevron"/></button>
               <button className="profile-action logout" onClick={async () => { if (dirty.current && !(await save())) return; try { await auth.logout(); window.location.reload(); } catch { toast("Could not log out. Please try again."); } }}><Icon name="logout" /><span>Log out</span></button>
             </section>
           </details>
@@ -311,13 +330,14 @@ export function App() {
 
 
       <div className="body">
-        <Rail dictionary={dictionary} progress={progress} step={step} applicationId={appId} onGo={goTo} />
+        <Rail dictionary={dictionary} progress={progress} step={step} onGo={goTo} />
         <main className="main" ref={main} tabIndex={-1}>
           <p className="application-title">{vaultOpen ? "HomeFlow · Document library" : "My Loan Application"}</p>
           {vaultOpen ? (
             <Vault documents={vaultDocuments} onOpen={setOpenDoc} applicationId={appId} onChanged={() => void load(appId)} />
           ) : stepSpec.id === "documents" ? (
             <DocumentsStep applicationId={appId} checklist={checklist.map(c => ["Self-employed", "Retired", "Not currently employed", "Other"].includes(values.employmentStatus) && ["w2", "paystub"].includes(c.document_tag) ? { ...c, required_count: 0, guidance: "Optional for your current employment situation. You can still upload this document if it applies to you." } : c)} documents={documents} vaultDocuments={vaultDocuments}
+                           header={<StepHero dictionary={dictionary} step={step} title="Your documents" lede={DOCUMENTS_LEDE} />}
                            onUploaded={() => void load(appId)} onOpenDoc={setOpenDoc} />
           ) : (
             <FormStep dictionary={dictionary} step={stepSpec} values={values} errors={errors}
@@ -349,8 +369,9 @@ export function App() {
 
 
 
-      {!chatOpen && !openDoc && <button className="assistant-launcher" type="button" aria-label="Ask HomeFlow about your documents" onClick={() => setChatOpen(true)}><Icon name="chat" /><span className="assistant-launcher-label">Ask HomeFlow</span></button>}
-      {chatOpen && <DocumentChat key={appId} applicationId={appId} onClose={() => setChatOpen(false)} onOpenSource={setOpenDoc} />}
+      {!chatOpen && !openDoc && <button className="assistant-launcher" type="button" aria-label={chatUnread ? "New reply from HomeFlow - open chat" : chatStarted ? "Resume HomeFlow conversation" : "Ask HomeFlow about your documents"} onClick={() => {setChatStarted(true);setChatOpen(true);setChatUnread(false);}}><Icon name="chat" /><span className="assistant-launcher-label">{chatUnread ? "New reply" : chatStarted ? "Resume chat" : "Ask HomeFlow"}</span>{chatUnread ? <span className="chat-unread-badge" role="status" aria-label="Unread reply">1</span> : chatStarted && <span className="chat-active-dot" aria-label="Conversation active" />}</button>}
+      {templateOpen && <TemplateDocuments applicationId={appId} onClose={()=>setTemplateOpen(false)}/>}
+      {chatStarted && <DocumentChat key={appId} applicationId={appId} minimized={!chatOpen || !!openDoc} onUnread={() => setChatUnread(true)} onClose={() => setChatOpen(false)} onOpenSource={setOpenDoc} />}
       <DocDrawer fileId={openDoc} onClose={() => setOpenDoc(null)}
                  onSaved={() => void load(appId)} />
     </div>

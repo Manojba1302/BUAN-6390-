@@ -27,7 +27,7 @@ class ChatGroundingTests(unittest.TestCase):
             self.assertEqual(_validated_answer(answer, self.sources)["citations"], [])
 
     def test_document_inventory_intent_does_not_capture_content_questions(self):
-        for question in ("what documents do i have", "List my documents", "Which files have I uploaded?", "how many documents do i have", "How many files are there?", "Please count my documents", "How many payslips do I have?", "Number of uploaded documents"):
+        for question in ("What are my documents?", "What are my files?", "Which are my uploads?", "What are the uploaded documents?", "what documents do i have", "List my documents", "Which files have I uploaded?", "how many documents do i have", "How many files are there?", "Please count my documents", "How many payslips do I have?", "Number of uploaded documents"):
             self.assertTrue(_inventory_question(question))
         for question in ("What pay rate do my documents show?", "What documents do I have to upload?", "Show my documents address", "How many documents do I have to upload?", "How many days until my license expires?"):
             self.assertFalse(_inventory_question(question))
@@ -65,6 +65,7 @@ class ChatGroundingTests(unittest.TestCase):
     def test_prompt_prohibits_pay_basis_and_ownership_guesses(self):
         prompt = _prompt("Explain gross pay", self.sources)
         self.assertIn("Never infer a pay basis", prompt)
+        self.assertIn("actual compared values", prompt)
         self.assertIn("missing earnings category is unknown, not zero", prompt)
         self.assertIn("Do not predict or verify", prompt)
 
@@ -95,3 +96,14 @@ class ChatGroundingTests(unittest.TestCase):
         result = _focus_passages(db, passages, "Summarize my pay slip")
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["content"], "Regular earnings\n\nDeductions")
+
+    def test_short_source_ids_round_trip_without_merging_documents(self):
+        from app.api.v1.chat import _compact_sources, _restore_source_ids, _supported_answer
+        sources = self.sources + [{"file_id":"another-owned-file","page":1,"content":"Net pay: 30.00","original_name":"second.pdf"}]
+        compact, aliases = _compact_sources(sources)
+        self.assertEqual([p["file_id"] for p in compact], ["s1","s2"])
+        raw = {"answer":"Pay rate is 617.50", "citations":[{"file_id":"s1","page":1}], "support":[{"file_id":"s1","page":1,"quote":"Pay rate: 617.50"}]}
+        restored = _restore_source_ids(raw, aliases)
+        self.assertEqual(_supported_answer(restored,sources)["citations"], [{"file_id":"owned-file","page":1}])
+        raw["citations"][0]["file_id"] = "s99"
+        self.assertEqual(_supported_answer(_restore_source_ids(raw,aliases),sources)["citations"], [])

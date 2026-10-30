@@ -53,5 +53,12 @@ def answer(db, customer, application_id, question):
         found = {r.field_name:r for r in rows if r.file_id==f.file_id}
         values = [document_answers._value(found[k]) if k in found else "" for k in keys]
         results.append(f"{f.original_name}: " + calculate(*values,question))
+    results.extend(_pay_note(keys))
     reply["answer"] = "Calculated separately for each document; no totals across people or periods.\n" + "\n".join(results) + "\n\n" + reply["answer"]
     return reply
+
+
+def _pay_note(keys):
+    if set(keys) != {"pay_rate", "gross_pay"}:
+        return []
+    return ["Pay rate is the stated rate and basis; gross pay is the period total. The difference alone does not establish overtime, extra hours or adjustments; the reason is unknown without supporting earnings details."]

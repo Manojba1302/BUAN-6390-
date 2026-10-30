@@ -69,10 +69,14 @@ def aligned_labels(page):
             if values:
                 lines.append(label + " " + " ".join(values))
     lines.extend(_aligned_amounts(page, words))
+    lines.extend(_summary_amounts(page, words))
     return "\n".join(lines)
 
 
 AMOUNT_LABELS = {
+    "gross_pay": r"gross (?:pay|earnings)",
+    "net_pay": r"net pay",
+    "ytd_gross": r"ytd gross",
     "regular_pay": r"regular (?:pay|earnings)",
     "overtime_pay": r"overtime(?: (?:pay|earnings))?",
     "bonus_pay": r"bonus(?: pay)?",
@@ -81,15 +85,34 @@ AMOUNT_LABELS = {
 }
 
 
+AMOUNT = r"\$?([\d,]+\.\d{2})"
+SEPARATOR = r"\s*(?::|\.{2,}|\s)\s*"          # "Gross Pay: 1.00", "Gross Pay ..... 1.00", "Gross Pay 1.00"
+CURRENT_YTD = re.compile(r"\bcurrent\b.*\bytd\b|\bthis period\b.*\byear to date\b", re.I)
+
+
 def _recover_amounts(candidates, pages):
-    """Only single-amount labelled rows; ambiguous tables and YTD stay unknown."""
+    """Single-amount labelled rows, and "label current ytd" rows under a Current/YTD header.
+
+    Any other multi-amount row stays unknown, so a year-to-date figure is never read as current.
+    """
     for page in pages:
-        for line in (page.get("text") or "").splitlines():
+        text = page.get("text") or ""
+        two_columns = bool(CURRENT_YTD.search(text))
+        for line in text.splitlines():
             for key, label in AMOUNT_LABELS.items():
-                pattern = r"^\s*(?:current(?: period)?\s+)?" + label + r"\s*:\s*\$?([\d,]+\.\d{2})\s*$"
-                match = re.fullmatch(pattern, line, re.I)
-                if match:
-                    _add(candidates, key, match[1].replace(",", ""), line.strip(), page)
+                _match_amount_row(candidates, key, label, line, page, two_columns)
+
+
+def _match_amount_row(candidates, key, label, line, page, two_columns):
+    start = r"^\s*(?:current(?: period)?\s+)?" + label + SEPARATOR
+    single = re.fullmatch(start + AMOUNT + r"\s*$", line, re.I)
+    pair = two_columns and re.fullmatch(start + AMOUNT + r"\s+" + AMOUNT + r"\s*$", line, re.I)
+    if single:
+        _add(candidates, key, single[1].replace(",", ""), line.strip(), page)
+    elif pair:
+        _add(candidates, key, pair[1].replace(",", ""), line.strip(), page)
+        if key == "gross_pay":
+            _add(candidates, "ytd_gross", pair[2].replace(",", ""), line.strip(), page)
 
 
 TABLE_LABELS = {"Regular (T)":"Regular earnings", "Regular Pay":"Regular earnings", "Overtime":"Overtime", "Fed Withholdng":"Federal withholding", "Federal Withholding":"Federal withholding"}
@@ -127,3 +150,35 @@ def _earnings_amount(words, header, right, center):
         return None
     values = [w[4] for w in words if abs(w[2]-columns[0][2]) < 3 and abs((w[1]+w[3])/2-center) < 2 and re.fullmatch(r"[\d,]+\.\d{2}",w[4])]
     return values[0] if len(values) == 1 else None
+
+
+SUMMARY_LABELS = ("TOTAL GROSS", "FED TAXABLE GROSS", "TOTAL TAXES", "TOTAL DEDUCTIONS", "NET PAY")
+
+
+def _summary_amounts(page, words):
+    anchor = page.search_for("TOTAL DEDUCTIONS")
+    if len(anchor) != 1:
+        return []
+    headers = [(label,rect) for label in SUMMARY_LABELS for rect in page.search_for(label) if abs(rect.y0-anchor[0].y0)<2]
+    headers.sort(key=lambda item:item[1].x0)
+    if len(headers)!=5:
+        return []
+    lines=[]
+    pairs=(("current","TOTAL GROSS","Gross pay"),("current","TOTAL DEDUCTIONS","Total deductions"),("current","NET PAY","Net pay"),("ytd","TOTAL GROSS","Ytd gross"))
+    for row,label,canonical in pairs:
+        candidates=[w for w in words if w[4].lower()==row and 0<(w[1]+w[3])/2-(anchor[0].y0+anchor[0].y1)/2<26]
+        if len(candidates)==1:
+            value=_summary_value(headers,words,candidates[0],label,page.rect.width)
+            if value is not None:
+                lines.append(canonical+": "+value)
+    return lines
+
+
+def _summary_value(headers,words,row,label,width):
+    i=next(i for i,(name,_) in enumerate(headers) if name==label)
+    centers=[(rect.x0+rect.x1)/2 for _,rect in headers]
+    left=(centers[i-1]+centers[i])/2 if i else 0
+    right=(centers[i]+centers[i+1])/2 if i<len(centers)-1 else width
+    center=(row[1]+row[3])/2
+    amounts=[w[4] for w in words if left<w[0] and w[2]<right and abs((w[1]+w[3])/2-center)<2 and re.fullmatch(r"[\d,]+\.\d{2}",w[4])]
+    return amounts[0] if len(amounts)==1 else None

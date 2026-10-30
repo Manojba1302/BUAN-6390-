@@ -168,6 +168,8 @@ export interface ExtractionRow {
 export interface DocumentDetail extends DocumentSummary {
   extractions: ExtractionRow[];
   missing_fields: string[];
+  /** The server allows reading the saved file again (failed, or key fields missing). */
+  can_retry?: boolean;
 }
 
 /** A file the customer has chosen but not yet uploaded. */

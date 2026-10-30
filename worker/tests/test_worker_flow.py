@@ -34,7 +34,7 @@ class FakeDb:
 
 class HandleTests(unittest.TestCase):
     def _run(self, fake, outcome="matched", fields=None):
-        fields = {"tax_year": {"value": "2025", "method": "native_text"}} if fields is None else fields
+        fields = {key: {"value": value, "method": "native_text"} for key, value in (("employee_name", "Example Person"), ("employer_name", "Example Employer"), ("box1_wages", "100.00"))} if fields is None else fields
         s3 = MagicMock()
         s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"%PDF")}
         with tempfile.TemporaryDirectory() as folder, \
@@ -54,14 +54,14 @@ class HandleTests(unittest.TestCase):
         fake = FakeDb()
         extract, md_written = self._run(fake)
         self.assertEqual(fake.names(), ["fetch_file", "bump_attempts", "set_status", "save_classification",
-                                        "clear_extractions", "save_extraction", "save_markdown",
+                                        "clear_extractions", "save_extraction", "save_extraction", "save_extraction", "save_markdown",
                                         "replace_chunks", "set_status", "audit"])
         self.assertTrue(md_written)
         extract.assert_called_once()
-        final = fake.calls[8]
+        final = fake.calls[10]
         self.assertEqual((final[1][1], final[2]), ("completed", {"pages": 1}))
-        audit = fake.calls[9]
-        self.assertEqual(audit[2]["payload"], {"fields": 1, "chunks": 1, "outcome": "matched"})
+        audit = fake.calls[11]
+        self.assertEqual(audit[2]["payload"], {"fields": 3, "chunks": 1, "outcome": "matched"})
 
     def test_unknown_document_is_not_extracted(self):
         fake = FakeDb()
@@ -140,3 +140,35 @@ class ExtractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeartbeatTests(unittest.TestCase):
+    def test_connection_io_continues_during_job(self):
+        from threading import Event
+        released = Event()
+        channel = MagicMock()
+        channel.connection.process_data_events.side_effect = lambda **kwargs: released.set()
+        def job(_):
+            if not released.wait(2):
+                raise AssertionError("Connection I/O was blocked by the job")
+        with patch.object(main,"handle",side_effect=job):
+            main._handle_with_heartbeats(channel,{"file_id":"synthetic"})
+        channel.connection.process_data_events.assert_called()
+
+
+class CompletedJobTests(unittest.TestCase):
+    def test_redelivered_completed_job_does_not_rerun_models(self):
+        fake=FakeDb(record={**RECORD,"status":"completed"})
+        with patch.object(main,"db",fake),patch.object(main.pipeline,"read") as read:
+            main.handle({"file_id":"done"})
+        self.assertEqual(fake.names(),["fetch_file"])
+        read.assert_not_called()
+
+
+class ExtractionQualityTests(unittest.TestCase):
+    def test_partial_w2_is_not_success(self):
+        with self.assertRaisesRegex(RuntimeError,"Incomplete W-2"):
+            main._validate_extraction("w2", {"tax_year":{"value":"2025"}})
+
+    def test_w2_requires_names_and_wages_but_allows_zero_wages(self):
+        main._validate_extraction("w2", {key:{"value":value} for key,value in (("employee_name","Example Person"),("employer_name","Example Employer"),("box1_wages","0.00"))})

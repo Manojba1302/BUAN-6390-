@@ -21,10 +21,15 @@ class Settings(BaseSettings):
     s3_secret_key: str = "homeflow123"
     s3_region: str = "us-east-1"
     markdown_dir: str = "/srv/markdown"
+    chat_evaluation_enabled: bool = False
+    chat_evaluation_bucket: str = "chat-evaluations"
+    chat_evaluation_hmac_key: str = ""
+    chat_evaluation_retention_days: int = 30
 
     ollama_base_url: str = "http://host.docker.internal:11434"
     classifier_model: str = "gemma3:4b"
     classifier_timeout_seconds: float = 120.0
+    model_keep_alive: str = "2m"   # how long Ollama keeps the document model loaded; "0" unloads after each call
 
     max_upload_mb: int = 20
     allowed_content_types: str = "application/pdf,image/jpeg,image/png,image/heic,image/webp,image/tiff"

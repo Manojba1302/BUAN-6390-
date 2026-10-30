@@ -2,10 +2,10 @@
  *  renderer that draws every input from the dictionary. */
 import {
   createContext, useCallback, useContext, useMemo, useState,
-  type ReactNode,
+  type CSSProperties, type ReactNode,
 } from "react";
 
-import { Icon } from "./icons";
+import { CHOICE_ICON, Icon } from "./icons";
 import { applyMask, validate, maskSensitive } from "./format";
 import type { Dictionary, FieldSpec, OptionSet, Progress } from "./types";
 
@@ -79,7 +79,7 @@ export function Tracker({ dictionary, progress, step, onGo }: {
 /* -------------------------------------------------------------------- rail */
 const RAIL_ICONS = ["home", "doc", "user", "home", "wallet", "check"];
 
-export function Rail({ dictionary, progress, step, applicationId, onGo }: {
+export function Rail({ dictionary, progress, step, onGo }: {
   dictionary: Dictionary; progress: Progress | null; step: number;
   applicationId?: string | null;
   onGo: (i: number) => void;
@@ -89,7 +89,6 @@ export function Rail({ dictionary, progress, step, applicationId, onGo }: {
       <div className="rail-card">
         <p className="rail-title">YOUR APPLICATION</p>
         <p className="rail-progress">Step {step + 1} of {dictionary.steps.length}</p>
-        {applicationId && <div className="rail-reference"><span>Application ID</span><strong title={applicationId}>HF-{applicationId.replaceAll("-", "").slice(0, 8).toUpperCase()}</strong><label>{progress?.steps.filter(s => s.complete).length ?? 0} of {dictionary.steps.length} sections complete</label><label>Application progress · {Math.round(progress?.percent ?? 0)}%</label><progress value={progress?.percent ?? 0} max={100} aria-label="Application progress" /></div>}
         {dictionary.steps.map((s, i) => {
           const state = progress?.steps[i];
           return (
@@ -103,8 +102,44 @@ export function Rail({ dictionary, progress, step, applicationId, onGo }: {
             </a>
           );
         })}
+        {progress && (() => {
+          const pct = Math.round(progress.percent);
+          const done = progress.steps.filter((s) => s.complete).length;
+          return (
+            <span className="rail-meter" role="img" aria-label={`Application ${pct}% complete, ${done} of ${dictionary.steps.length} sections done`}
+                  style={{ "--v": pct } as CSSProperties}>
+              <b>{pct}%</b>
+              <span className="rail-meter-bars" aria-hidden="true">
+                {dictionary.steps.map((s, i) => (
+                  <span key={s.id} style={{ animationDelay: `${i * 0.08}s` }}
+                        className={progress.steps[i]?.complete ? "done" : i === step ? "now" : ""} />
+                ))}
+              </span>
+            </span>
+          );
+        })()}
       </div>
     </nav>
+  );
+}
+
+/* ------------------------------------------------- application progress */
+
+/** The dark header on every step: step number, title, a short line, and an optional action. */
+export function StepHero({ dictionary, step, title, lede, action }: {
+  dictionary: Dictionary; step: number; title: ReactNode; lede: ReactNode; action?: ReactNode;
+}) {
+  return (
+    <section className="step-hero" aria-labelledby="step-hero-title">
+      <div className="step-hero-top">
+        <div className="step-hero-copy">
+          <p className="step-hero-eyebrow">Step {step + 1} of {dictionary.steps.length}</p>
+          <h1 id="step-hero-title">{title}</h1>
+          <p className="step-hero-lede">{lede}</p>
+        </div>
+        {action}
+      </div>
+    </section>
   );
 }
 
@@ -151,9 +186,13 @@ export function Field(props: FieldProps) {
   const id = `f_${name}`;
   const invalid = Boolean(error);
   const [editingSensitive, setEditingSensitive] = useState(false);
+  const [focused, setFocused] = useState(false);
+  // Floating label: sits inside the box, moves up when the box has focus or a value.
+  const raised = focused || value !== "" || editingSensitive || spec.widget === "select" || spec.widget === "date";
+  const focus = () => setFocused(true);
 
   return (
-    <div className="f" data-field={name}>
+    <div className={`f fl ${raised ? "up" : ""}`} data-field={name}>
       <label className="cap" htmlFor={id}>
         {spec.label}{spec.required && <span className="req">*</span>}
 
@@ -167,7 +206,8 @@ export function Field(props: FieldProps) {
                  value={editingSensitive ? value : maskSensitive(value)}
                  aria-describedby={`${id}_privacy`}
                  onChange={e => onChange(applyMask(spec.widget, e.target.value))}
-                 onBlur={() => { setEditingSensitive(false); onBlur(); }}
+                 onFocus={focus}
+                 onBlur={() => { setFocused(false); setEditingSensitive(false); onBlur(); }}
                  onKeyDown={e => { if (e.key === "Enter") { setEditingSensitive(false); onBlur(); } }} />
           <button type="button" className="sensitive-edit" onMouseDown={e => e.preventDefault()} onClick={() => { setEditingSensitive(v => !v); onBlur(); }}>
             {editingSensitive ? "Done" : value ? "Edit" : "Enter"}
@@ -176,7 +216,7 @@ export function Field(props: FieldProps) {
         </div>
       ) : spec.widget === "select" ? (
         <select id={id} className="ctl" value={value} aria-invalid={invalid}
-                onChange={(e) => onChange(e.target.value)} onBlur={onBlur}>
+                onChange={(e) => onChange(e.target.value)} onFocus={focus} onBlur={() => { setFocused(false); onBlur(); }}>
           <option value="">Select one</option>
           {options.map((o) => {
             const v = typeof o === "string" ? o : o.value;
@@ -188,7 +228,7 @@ export function Field(props: FieldProps) {
         <div className="money">
           <span className="sym">$</span>
           <input id={id} className="ctl" inputMode="decimal" value={value} aria-invalid={invalid}
-                 autoComplete="off" onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
+                 autoComplete="off" onChange={(e) => onChange(e.target.value)} onFocus={focus} onBlur={() => { setFocused(false); onBlur(); }} />
         </div>
       ) : (
         <input id={id} className="ctl" aria-invalid={invalid}
@@ -197,7 +237,7 @@ export function Field(props: FieldProps) {
                placeholder={spec.placeholder ?? ""}
                value={value}
                onChange={(e) => onChange(applyMask(spec.widget, e.target.value))}
-               onBlur={onBlur} />
+               onFocus={focus} onBlur={() => { setFocused(false); onBlur(); }} />
       )}
 
       {spec.help && !error && <p className="help">{spec.help}</p>}
@@ -225,7 +265,7 @@ export function Cards({ options, value, onChange }: {
         const hint = typeof o === "string" ? "" : o.hint ?? "";
         return (
           <button key={v} type="button" aria-pressed={value === v} className={`choice ${value === v ? "on" : ""}`} onClick={() => onChange(v)}>
-            <span className="ci"><Icon name={{ Employed: "wallet", "Self-employed": "folder", Retired: "user", "Not currently employed": "refresh", Other: "chat" }[v] ?? "home"} /></span>
+            <span className="ci"><Icon name={CHOICE_ICON[label] ?? "home"} /></span>
             <span className="choice-copy"><b>{label}</b><span>{hint}</span></span>
             <span className="choice-radio" aria-hidden="true">{value === v && <Icon name="check" />}</span>
           </button>
@@ -240,8 +280,11 @@ export function Segmented({ value, onChange, labels = ["Yes", "No"], values = ["
   value: string | undefined; onChange: (v: string) => void;
   labels?: [string, string] | string[]; values?: [string, string] | string[];
 }) {
+  const picked = values.indexOf(value ?? "");
   return (
-    <span className="seg">
+    <span className="seg" style={{ "--seg-n": values.length } as CSSProperties}>
+      <span className="seg-thumb" aria-hidden="true"
+            style={{ transform: `translateX(${Math.max(0, picked) * 100}%)`, opacity: picked < 0 ? 0 : 1 }} />
       {values.map((v, i) => (
         <button key={v} className={value === v ? "on" : ""} onClick={() => onChange(v)}>
           {labels[i]}
