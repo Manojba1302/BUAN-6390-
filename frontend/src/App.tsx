@@ -7,11 +7,11 @@ import type { CustomerProfile } from "./api";
 import { TemplateDocuments } from "./TemplateDocuments";
 import { DocumentChat } from "./DocumentChat";
 import { DocDrawer } from "./DocDrawer";
-import { DocCard, DocumentsStep } from "./Documents";
+import { DocCard, DocumentsStep, DOCUMENTS_LEDE } from "./Documents";
 import { validate } from "./format";
 import { Icon } from "./icons";
 import { FormStep, type Provenance } from "./Steps";
-import { FootNav, Rail, useToast } from "./ui";
+import { FootNav, Rail, StepHero, useToast } from "./ui";
 import type {
   ApplicationState, ChecklistItem, Dictionary, DocumentSummary, Progress, NameSuggestion, AddressSuggestion, EmploymentSuggestion,
 } from "./types";
@@ -307,6 +307,18 @@ export function App() {
                   <div className="profile-account-reference"><small>Account reference</small><p className="profile-reference">{customerId || user.customer_id}</p></div>
                 </div>
               </details>
+              {appId && (() => {
+                const reference = `HF-${appId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+                return (
+                  <div className="profile-app-id">
+                    <span><small>Application ID</small><strong>{reference}</strong></span>
+                    <button type="button" onClick={async () => {
+                      try { await navigator.clipboard.writeText(reference); toast("Application ID copied", "ok"); }
+                      catch { toast(`Could not copy. Your application ID is ${reference}.`); }
+                    }}><Icon name="copy" />Copy</button>
+                  </div>
+                );
+              })()}
               <button className="profile-action" onClick={e => { e.currentTarget.closest("details")?.removeAttribute("open"); void goTo(2); }}><Icon name="user" /><span>Personal information</span><Icon name="chevron" /></button>
               <button className="profile-action" onClick={async e => { const menu = e.currentTarget.closest("details"); if (dirty.current && !(await save())) return; setVaultOpen(true); menu?.removeAttribute("open"); }}><Icon name="folder" /><span>My vault</span><Icon name="chevron" /></button>
               <button className="profile-action" onClick={async e=>{const menu=e.currentTarget.closest("details");if(dirty.current&&!(await save()))return;menu?.removeAttribute("open");setTemplateOpen(true);}}><Icon name="doc"/><span>Generate document (POC)</span><Icon name="chevron"/></button>
@@ -318,13 +330,14 @@ export function App() {
 
 
       <div className="body">
-        <Rail dictionary={dictionary} progress={progress} step={step} applicationId={appId} onGo={goTo} />
+        <Rail dictionary={dictionary} progress={progress} step={step} onGo={goTo} />
         <main className="main" ref={main} tabIndex={-1}>
           <p className="application-title">{vaultOpen ? "HomeFlow · Document library" : "My Loan Application"}</p>
           {vaultOpen ? (
             <Vault documents={vaultDocuments} onOpen={setOpenDoc} applicationId={appId} onChanged={() => void load(appId)} />
           ) : stepSpec.id === "documents" ? (
             <DocumentsStep applicationId={appId} checklist={checklist.map(c => ["Self-employed", "Retired", "Not currently employed", "Other"].includes(values.employmentStatus) && ["w2", "paystub"].includes(c.document_tag) ? { ...c, required_count: 0, guidance: "Optional for your current employment situation. You can still upload this document if it applies to you." } : c)} documents={documents} vaultDocuments={vaultDocuments}
+                           header={<StepHero dictionary={dictionary} step={step} title="Your documents" lede={DOCUMENTS_LEDE} />}
                            onUploaded={() => void load(appId)} onOpenDoc={setOpenDoc} />
           ) : (
             <FormStep dictionary={dictionary} step={stepSpec} values={values} errors={errors}

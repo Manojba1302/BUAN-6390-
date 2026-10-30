@@ -154,6 +154,7 @@ def get_document(file_id: UUID, db: Session = Depends(get_db),
         "review_state": e.review_state,
     } for e in db.scalars(select(Extraction).where(Extraction.file_id == file_id))]
     detail["missing_fields"] = _missing_fields(detail["document_tag"], detail["extractions"])
+    detail["can_retry"] = _retry_allowed(db, row)
     return detail
 
 
@@ -366,7 +367,7 @@ def retry_document(file_id: UUID, db: Session=Depends(get_db), customer: Custome
     if row is None:
         raise HTTPException(404,"Document not found")
     if not _retry_allowed(db, row):
-        raise HTTPException(409,"Only failed or incomplete W-2 documents can be retried")
+        raise HTTPException(409,"Only failed or incomplete documents can be read again")
     row.status, row.error_detail, row.attempts = "queued", None, 0
     db.commit()
     try:
@@ -377,14 +378,25 @@ def retry_document(file_id: UUID, db: Session=Depends(get_db), customer: Custome
         raise HTTPException(503,"Could not restart document processing")
 
 
+# The fields that make a read useful. A completed read missing any of them can be read again
+# from the saved file, which is the only way to re-read it: uploading the same file reuses it.
+KEY_FIELDS = {
+    "w2": ("employee_name", "employer_name", "box1_wages"),
+    "paystub": ("employee_name", "employer_name", "gross_pay", "pay_date"),
+    "bank_statement": ("account_holder", "ending_balance", "period_end"),
+    "drivers_license": ("full_name", "date_of_birth", "license_number", "expiry_date"),
+    "ssn_card": ("full_name", "ssn"),
+}
+
+
 def _retry_allowed(db, row):
     if row.status == "failed":
         return True
-    if row.status != "completed" or row.document_tag != "w2":
+    if row.status != "completed" or row.document_tag not in KEY_FIELDS:
         return False
     rows = db.scalars(select(Extraction).where(Extraction.file_id == row.file_id)).all()
     have = {e.field_name for e in rows if (e.corrected_value if e.corrected_value is not None else e.value_normalized or e.value_raw)}
-    return not {"employee_name", "employer_name", "box1_wages"}.issubset(have)
+    return not set(KEY_FIELDS[row.document_tag]).issubset(have)
 
 
 def _reuse_upload(db, existing, application_id, customer):

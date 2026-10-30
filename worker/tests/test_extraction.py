@@ -36,6 +36,46 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(model.call_args.kwargs["images"], [b"photo"])
         self.assertEqual((fields["full_name"]["method"], fields["ssn"]["method"]), ("ocr", "vision"))
 
+    def test_glued_license_label_from_ocr_text_is_peeled_on_a_texas_card(self):
+        # A real Texas photo: OCR turned "4d DL 52224976" into "44052224976".
+        text = ("DRIVER LICENSE\nLIMITED-TERM\n44052224976 2008 04/21/1996 gdas C\n1 UWAZIE\n2 MICHAEL JNR UGOCHUKWU\n"
+                "8 7650 MCCALLUM BLVD #1005\nDALLAS, TX 75252\n4b Exp 05/12/2027\n15 Sex M\n" + "Printed card notices. " * 6)
+        page = {"text": text, "image": b"photo", "method": "ocr", "ocr_confidence": 72}
+        text_answer = {"full_name": "UWAZIE MICHAEL JNR UGOCHUKWU", "license_number": "44052224976", "date_of_birth": "1996-04-21",
+                       "address": "7650 MCCALLUM BLVD #1005", "city": "DALLAS", "state": "TX", "zip": "75252",
+                       "issue_date": None, "expiry_date": "2027-05-12"}
+        image_answer = {"fields": {"license_number": {"value": "52224976", "quote": ""}, "issue_date": {"value": "2026-05-12", "quote": ""}}}
+        with patch.object(pipeline.ollama, "generate_json", side_effect=[text_answer, image_answer]) as model:
+            fields = pipeline.extract({"pages": [page]}, "drivers_license")
+        self.assertEqual(model.call_count, 2)
+        # Texas address on the card: the label glued in front ("440") is peeled off the text read.
+        self.assertEqual(fields["license_number"]["value"], "52224976")
+        self.assertEqual(fields["license_number"]["method"], "ocr")
+
+    def test_small_phone_photo_is_enlarged_for_ocr_only(self):
+        import io
+        from PIL import Image
+        import pages
+        small = io.BytesIO(); Image.new("RGB", (768, 1024), "white").save(small, "JPEG")
+        big = io.BytesIO(); Image.new("RGB", (3000, 4000), "white").save(big, "JPEG")
+        size = lambda data: Image.open(io.BytesIO(data)).size
+        page = pages.read_document(small.getvalue(), "image/jpeg", "license.jpeg")["pages"][0]
+        self.assertEqual(max(size(page["ocr_image"])), pages.OCR_MIN_PHOTO_EDGE)
+        self.assertEqual(max(size(page["image"])), 1024)                       # the vision copy is not enlarged
+        self.assertEqual(max(size(pages.read_document(big.getvalue(), "image/jpeg", "x.jpg")["pages"][0]["ocr_image"])), pages.OCR_LONG_EDGE)
+
+    def test_glued_license_run_from_ocr_text_is_peeled_to_the_number(self):
+        text = ("DRIVER LICENSE\naa ad 052224976 \u2014 300804/21/1996 9a C\n1 UWAZIE\n2 MICHAEL JNR UGOCHUKWU\n"
+                "8 7650 MCCALLUM BLVD #1005\nDALLAS, TX 75252\n4a iss 05/12/2026\n4b Exp 05/12/2027\n15 Sex M\n" + "Card notices. " * 6)
+        answer = {"full_name": "UWAZIE MICHAEL JNR UGOCHUKWU", "license_number": "052224976", "date_of_birth": "1996-04-21",
+                  "address": "7650 MCCALLUM BLVD #1005", "city": "DALLAS", "state": "TX", "zip": "75252",
+                  "issue_date": "2026-05-12", "expiry_date": "2027-05-12"}
+        image_answer = {"fields": {"license_number": {"value": "99999999", "quote": ""}}}
+        with patch.object(pipeline.ollama, "generate_json", side_effect=[answer, image_answer]):
+            fields = pipeline.extract({"pages": [{"text": text, "image": b"photo", "method": "ocr", "ocr_confidence": 64}]}, "drivers_license")
+        self.assertEqual(fields["license_number"]["value"], "52224976")    # kept from the text; the image does not overwrite it
+        self.assertEqual(fields["license_number"]["method"], "ocr")
+
     def test_ocr_reads_the_high_resolution_copy(self):
         document = {"pages": [{"text": "", "method": "vision", "image": b"small", "ocr_image": b"large"}]}
         with patch.object(pipeline.pages, "read_document", return_value=document), patch.object(pipeline, "_ocr", return_value=("", 0.0)) as ocr:
@@ -182,3 +222,19 @@ class FileVarietyRegressionTests(unittest.TestCase):
         data = {"text": ["Net", "Pay", "", "2.00"], "conf": [90, 80, -1, 70], "block_num": [1, 1, 1, 2], "par_num": [1, 1, 1, 1], "line_num": [1, 1, 1, 1]}
         self.assertEqual(pipeline._ocr_text(data), ("Net Pay\n\n2.00\n", 80.0))
 
+
+
+class HeicPhotoTests(unittest.TestCase):
+    """iPhone photos arrive as HEIC; the page must reach OCR and the model as a normal image."""
+
+    def test_heic_photo_is_read_like_a_jpeg(self):
+        try:
+            import io
+            import pillow_heif
+            from PIL import Image
+        except ImportError:
+            self.skipTest("pillow-heif is not installed")
+        out = io.BytesIO()
+        pillow_heif.from_pillow(Image.new("RGB", (640, 400), "white")).save(out, quality=80)
+        page = pipeline.pages.read_document(out.getvalue(), "image/heic", "photo.heic")["pages"][0]
+        self.assertTrue(page["image"].startswith(b"\x89PNG"), "HEIC should be converted to PNG for the model")

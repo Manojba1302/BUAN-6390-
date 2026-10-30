@@ -14,6 +14,7 @@ import pay_evidence
 import label_evidence
 import license_evidence
 import address_evidence
+import employer_evidence
 import bank_evidence
 import money_values
 import doc_types
@@ -172,12 +173,30 @@ def _read_page(out, prompt, page, index, spec) -> bool:
     read = answer is not None
     if read:
         _collect_fields(out, answer, spec, page, index, vision=not text_first and bool(page.get("image")))
+    if text_first:
+        _drop_unconfirmed_license(out, spec, page)
     if text_first and not _enough_fields(spec, out):
         answer = _extract_page(prompt, page, index, spec, use_image=True)
         if answer is not None:
             read = True
             _collect_fields(out, answer, spec, page, index, vision=True)
     return read
+
+
+def _drop_unconfirmed_license(out, spec, page):
+    """On a card photo the OCR text can glue the small "4d DL" label onto the number
+    ("052224976", "44052224976"). A text-only read then copies that run. The number is kept
+    (with the label peeled off) only when the page text backs it up; otherwise it is dropped
+    here so the image reads it instead."""
+    entry = out.get("license_number")
+    if spec.get("id") != "drivers_license" or not entry:
+        return
+    texts = [page.get("text") or ""]
+    number = license_evidence.confirm(entry["value"], texts, license_evidence.card_state(texts, out.get("state", {}).get("value")))
+    if number:
+        out["license_number"] = {**entry, "value": number, "normalized": number}
+    else:
+        out.pop("license_number")
 
 
 def _recover_evidence(document_tag, source_pages, out):
@@ -192,6 +211,7 @@ def _recover_evidence(document_tag, source_pages, out):
     if document_tag == "bank_statement" and all(p.get("method") == "native_text" for p in source_pages):
         out.pop("account_mask",None)
     out.update(bank_evidence.recover(document_tag, numbered))
+    out = employer_evidence.reconcile(document_tag, numbered, out)
     return label_evidence.verify(document_tag, numbered, license_evidence.reconcile(document_tag, numbered, out))
 
 

@@ -1,5 +1,5 @@
 /** Local preview first; server classification starts only after Submit. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { api, ApiError } from "./api";
 import { bytes } from "./format";
@@ -19,9 +19,13 @@ interface Props {
   vaultDocuments: DocumentSummary[];
   onUploaded: () => void;
   onOpenDoc: (fileId: string) => void;
+  /** Replaces the plain step heading, e.g. with the dark step header. */
+  header?: ReactNode;
 }
 
 type CatState = { have: number; need: number; flagged: boolean; satisfied: boolean };
+
+export const DOCUMENTS_LEDE = "Choose what a file is before you pick it, so we can tell you straight away if something looks wrong. Preview stays on your device until you press Submit. We then check the document type and save accepted files.";
 
 export function DocumentsStep(props: Props) {
   const { applicationId, checklist, documents, onUploaded, onOpenDoc } = props;
@@ -112,38 +116,39 @@ export function DocumentsStep(props: Props) {
 
   return (
     <>
-      <p className="eyebrow">Step 2</p>
-      <h1 className="h1">Your documents</h1>
-      <p className="lede">
-        Choose what a file is before you pick it, so we can tell you straight away if something
-        looks wrong. Preview stays on your device until you press Submit. We then check the document type and save accepted files.
-      </p>
+      {props.header ?? <>
+        <p className="eyebrow">Step 2</p>
+        <h1 className="h1">Your documents</h1>
+        <p className="lede">{DOCUMENTS_LEDE}</p>
+      </>}
       <ol className="upload-guide" aria-label="Upload steps">
         <li><span>1</span>Choose document type</li>
         <li><span>2</span>Preview your file</li>
         <li><span>3</span>Upload and review</li>
       </ol>
 
-      {missing.length ? (
-        <div className="banner w">
-          <Icon name="alert" />
-          <div>
-            <b>{missing.length} document type{missing.length > 1 ? "s" : ""} still needed</b>
-            {missing.map((m) => m.display_name).join(", ")}. We cannot review your application without them.
-          </div>
-        </div>
-      ) : (
-        <div className="banner">
-          <Icon name="check" />
-          <div>
-            <b>Requested file counts received</b>
-            Review the dates and pages too. File counts alone do not verify statement periods or completeness.
-          </div>
-        </div>
-      )}
 
-      <section className="card">
-        <h2>What we need</h2><p className="document-period-note">For the supplied W-2 purchase workflow: two latest paystubs, two years of W-2s and two months of statements for each bank account. Your loan team may request updates.</p>
+      <section className="card need-card">
+        {(() => {
+          const requiredTypes = checklist.filter((c) => c.required_count > 0).length;
+          const doneTypes = requiredTypes - missing.length;
+          const pct = requiredTypes ? Math.round((doneTypes / requiredTypes) * 100) : 100;
+          return (
+            <div className={`need-head ${missing.length ? "" : "done"}`}>
+              <div className="need-copy">
+                <h2>What we need</h2>
+                <p role="status">{missing.length
+                  ? <><b>{missing.length} to go</b> before we can review your application.</>
+                  : <><b>Every requested document is here.</b> Review the dates and pages too. File counts alone do not verify statement periods or completeness.</>}</p>
+              </div>
+              <span className="need-ring" style={{ "--v": pct } as CSSProperties} role="img"
+                    aria-label={`${doneTypes} of ${requiredTypes} required document types complete`}>
+                <span>{missing.length ? <>{doneTypes}<small>/{requiredTypes}</small></> : <Icon name="check" />}</span>
+              </span>
+            </div>
+          );
+        })()}
+        <p className="document-period-note">For the supplied W-2 purchase workflow: two latest paystubs, two years of W-2s and two months of statements for each bank account. Your loan team may request updates.</p>
         <p className="hint">
           PDF, JPG, PNG or HEIC. Up to 20 MB each. A photo from your phone is fine if every
           corner is in frame.
@@ -152,9 +157,11 @@ export function DocumentsStep(props: Props) {
           {checklist.map((c) => {
             const s = state(c.document_tag);
             const cls = s.flagged ? "warn" : s.satisfied ? "ok" : "";
+            const fill = s.have ? "has" : s.need ? "needed" : "optional";
             return (
-              <button key={c.document_tag} className={`doctile ${cls}`}
+              <button key={c.document_tag} className={`doctile ${cls} ${fill} doctype-${c.document_tag}`}
                       onClick={() => { setActiveCat(c.document_tag); discard(); }}>
+                <span className="tile-art" aria-hidden="true">{s.have ? <TileArt tag={c.document_tag} /> : <Icon name="plus" />}</span>
                 <span className="ti"><Icon name={CATEGORY_ICON[c.document_tag] ?? "doc"} /></span>
                 <span className="tt">
                   <b>{c.display_name}</b>
@@ -353,7 +360,7 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       : doc.status === "completed" && doc.missing_field_count > 0
       ? <span className="chip w"><Icon name="alert" />Fields need review</span>
       : outcome === "matched"
-      ? <span className="chip g"><Icon name="check" />Type matched</span>
+      ? <span className="chip g"><Icon name="check" />Document type matched</span>
       : outcome
       ? <span className="chip w"><Icon name="alert" />Needs a look</span>
       : <span className="chip n">Stored</span>;
@@ -380,5 +387,32 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       {locked && <small className="hint">Linked to a submitted application</small>}
     </div>}
     </div>
+  );
+}
+
+/** Small drawing of each document type, shown on its tile once a file is in. */
+function TileArt({ tag }: { tag: string }) {
+  if (tag === "drivers_license" || tag === "ssn_card") {
+    return (
+      <svg width="96" height="64" viewBox="0 0 96 64" fill="none">
+        <rect x="1" y="1" width="94" height="62" rx="9" fill="#fff" stroke="#a9d9c2" strokeWidth="1.5" />
+        {tag === "drivers_license" ? <circle cx="24" cy="26" r="10" fill="#d8f3e6" /> : <rect x="14" y="16" width="20" height="20" rx="4" fill="#d8f3e6" />}
+        <rect x="44" y="18" width="38" height="5" rx="2.5" fill="#0e6b5c" />
+        <rect x="44" y="28" width="26" height="4" rx="2" fill="#d5e3dc" />
+        <rect x="14" y="46" width="68" height="4" rx="2" fill="#d5e3dc" />
+      </svg>
+    );
+  }
+  const accent = tag === "w2" ? <><rect x="11" y="11" width="16" height="10" rx="2" fill="#0e6b5c" /><rect x="30" y="11" width="15" height="10" rx="2" fill="#d8f3e6" /></>
+    : tag === "bank_statement" ? <><rect x="11" y="11" width="22" height="5" rx="2.5" fill="#0e6b5c" /><rect x="11" y="48" width="34" height="7" rx="3.5" fill="#c9f27b" /></>
+    : <><rect x="11" y="11" width="26" height="5" rx="2.5" fill="#0e6b5c" /><rect x="11" y="52" width="18" height="6" rx="3" fill="#c9f27b" /></>;
+  return (
+    <svg width="56" height="74" viewBox="0 0 56 74" fill="none">
+      <rect x="1" y="1" width="54" height="72" rx="7" fill="#fff" stroke="#a9d9c2" strokeWidth="1.5" />
+      {accent}
+      <rect x="11" y="27" width="34" height="4" rx="2" fill="#d5e3dc" />
+      <rect x="11" y="35" width="30" height="4" rx="2" fill="#d5e3dc" />
+      {tag !== "bank_statement" && <rect x="11" y="43" width="34" height="4" rx="2" fill="#d5e3dc" />}
+    </svg>
   );
 }

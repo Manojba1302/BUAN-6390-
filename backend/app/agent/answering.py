@@ -18,13 +18,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 
 from app.db.models import Application, File
-from app.agent import evaluation, streaming
+from app.agent import evaluation, streaming, generation
+from embedding_config import MODEL as EMBED_MODEL
 from app.services import document_answers, structured_chat, chat_evidence, chat_tools, document_summaries, chat_privacy, chat_scope, missing_document_fields
 
 log = logging.getLogger(__name__)
 
-EMBED_MODEL = "nomic-embed-text"
-ANSWER_MODEL = os.getenv("CHAT_MODEL", "llama3.1:8b")
+ANSWER_MODEL = generation.model_name()
 
 SOURCE_SCHEMA = {"type":"object","properties":{"file_id":{"type":"string"},"page":{"type":"integer"}},"required":["file_id","page"],"additionalProperties":False}
 SUPPORT_SCHEMA = {"type":"object","properties":{**SOURCE_SCHEMA["properties"],"quote":{"type":"string","maxLength":160}},"required":["file_id","page","quote"],"additionalProperties":False}
@@ -173,13 +173,14 @@ def _check_application(db, customer, application_id):
 
 
 def _answer(question, passages):
-    evaluation.configure_model(ANSWER_MODEL, 4096, 512)
+    tokens = generation.token_limit()
+    evaluation.configure_model(ANSWER_MODEL, 4096, tokens)
     compact, aliases = _compact_sources(passages)
     try:
-        answer = ollama.generate_json(model=ANSWER_MODEL, prompt=_prompt(question, compact), timeout=120.0, options={"num_predict": 512, "num_ctx": 4096}, response_schema=REPLY_SCHEMA, measure_first_token=True, metrics_callback=evaluation.model, on_text=streaming.forwarder())
+        answer = generation.generate_json(model=ANSWER_MODEL, prompt=_prompt(question, compact), timeout=120.0, options={"num_predict": tokens, "num_ctx": 4096}, response_schema=REPLY_SCHEMA, measure_first_token=True, metrics_callback=evaluation.model, on_text=streaming.forwarder())
     except ollama.OllamaError as exc:
         detail = "The model returned an incomplete or invalid answer. Please try a more specific question." if str(exc).startswith("model did not return JSON") else "The document assistant took too long or is unavailable. Please try again."
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail) from exc
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, getattr(exc, "public_message", detail)) from exc
     answer = _restore_source_ids(answer, aliases)
     return _comparison_guard(_supported_answer(answer, passages), passages, question)
 

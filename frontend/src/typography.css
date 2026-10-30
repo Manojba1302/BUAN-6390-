@@ -1,5 +1,5 @@
-/* Treasury-inspired pairing: self-hosted open-source Lexend + Fraunces. */
-:root { --font-ui: "Lexend Variable", system-ui, sans-serif; --font-display: "Fraunces Variable", Georgia, serif; }
+/* Self-hosted open-source pairing: Geist for the interface, Bricolage Grotesque for headings. */
+:root { --font-ui: "Geist Variable", system-ui, sans-serif; --font-display: "Bricolage Grotesque Variable", system-ui, sans-serif; --font-mono: "Geist Mono Variable", ui-monospace, monospace; }
 body { font-family: var(--font-ui); font-weight: 400; line-height: 1.65; -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font-family: var(--font-ui); }
 h1, .hero-copy h1 { font-family: var(--font-display); font-weight: 450; letter-spacing: -.035em; line-height: 1.15; }

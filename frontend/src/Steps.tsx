@@ -1,9 +1,9 @@
 /** Every step except documents is rendered straight from the field dictionary.
  *  Adding a field to the JSON adds it to the screen, with no change here. */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { Icon } from "./icons";
 import { money, money2, num } from "./format";
-import { Cards, Field, Segmented } from "./ui";
+import { Cards, Field, Segmented, StepHero } from "./ui";
 import type {
   Dictionary, FieldSpec, GroupSpec, Progress, RepeatableSpec, StepSpec, NameSuggestion, AddressSuggestion, EmploymentSuggestion,
 } from "./types";
@@ -38,12 +38,15 @@ export function FormStep(props: StepProps) {
   const focused = dictionary.steps[0]?.id === step.id;
   return (
     <>
-      <p className="eyebrow">Step {dictionary.steps.findIndex((s) => s.id === step.id) + 1}</p>
-      <h1 className="h1">{step.title}</h1>
-      <p className="lede">{step.lede}</p>
-      {focused && <>
-        <div className="journey-start"><div><b>{props.accountName ? `Welcome, ${props.accountName}.` : "Choose your starting point"}</b><p>Answer a few questions, or upload your documents first and review any suggested answers.</p></div><button className="btn sec" onClick={() => props.onGo(1)}><Icon name="upload" />Start with documents</button></div>
-      </>}
+      {focused ? (
+        <StepHero dictionary={dictionary} step={0}
+                  title={props.accountName ? `Welcome, ${props.accountName}.` : step.title}
+                  lede="Answer a few questions, or upload your documents first and review any suggested answers."
+                  action={<button className="step-hero-action" onClick={() => props.onGo(1)}><Icon name="upload" />Start with documents</button>} />
+      ) : (
+        <StepHero dictionary={dictionary} step={dictionary.steps.findIndex((s) => s.id === step.id)}
+                  title={step.title} lede={step.lede} />
+      )}
       {step.groups.some(g => g.fields?.some(n => props.provenance[n])) && <div className="prefill-notice"><Icon name="spark" /><div><b>A head start from your documents</b><p>Review the suggested details below. You can edit any answer or open its source.</p></div></div>}
       {step.groups.map((group, i) => (
         <Group key={`${step.id}-${i}`} group={group} {...props} />
@@ -139,13 +142,101 @@ function Group(props: StepProps & { group: GroupSpec }) {
 
       {agreeFields.map((name) => <EConsent key={name} {...props} name={name} />)}
 
-      {(group.computed ?? []).map((c) => (
+      {(group.computed ?? []).map((c) => c.id === "loanAmount" ? (
+        <LoanPlanner key={c.id} label={c.label} values={values} onChange={onChange} onBlur={onBlur} />
+      ) : (
         <div className="totrow" key={c.id}>
           <b>{c.label}</b>
           <span className="amt">{computed(c.formula, values)}</span>
         </div>
       ))}
     </section>
+  );
+}
+
+/* ------------------------------------------- loan planner (property step) */
+// Sliders and a percent box that write into the same propertyValue and downPayment
+// fields as the $ inputs above, plus a live summary. Nothing new is saved.
+const PRICE_MIN = 50000, PRICE_MAX = 2000000, PRICE_STEP = 5000, DOWN_MAX = 100;
+const DOWN_MARKS = [0, 20, 50, 100];   // 20% is the usual no-mortgage-insurance line
+
+function LoanSlider({ label, min, max, step, value, bubble, valueText, disabled, onChange, onDone }: {
+  label: string; min: number; max: number; step: number; value: number; bubble: string; valueText: string;
+  disabled?: boolean; onChange: (v: number) => void; onDone: () => void;
+}) {
+  const clamped = Math.min(max, Math.max(min, value));
+  const pct = ((clamped - min) / (max - min)) * 100;
+  return (
+    <span className="planner-slider">
+      <span className="planner-bubble" aria-hidden="true" style={{ left: `calc(${pct}% + ${15 - pct * 0.3}px)`, transform: `translateX(-${pct}%)`, "--a": `${pct}%` } as CSSProperties}>{bubble}</span>
+      <input type="range" className="planner-range" min={min} max={max} step={step} value={clamped}
+             aria-label={label} aria-valuetext={valueText} disabled={disabled}
+             style={{ "--p": `${pct}%` } as CSSProperties}
+             onChange={(e) => onChange(Number(e.target.value))} onBlur={onDone} />
+    </span>
+  );
+}
+
+function LoanPlanner({ label, values, onChange, onBlur }: {
+  label: string; values: Record<string, string>;
+  onChange: (name: string, value: string) => void; onBlur: (name: string) => void;
+}) {
+  const price = num(values.propertyValue);
+  const down = Math.min(num(values.downPayment), price || Infinity);
+  const downPct = price > 0 ? (down / price) * 100 : 0;
+  const loan = Math.max(0, price - down);
+  const ltv = price > 0 ? Math.round((loan / price) * 100) : 0;
+  const [pctDraft, setPctDraft] = useState<string | null>(null);
+  const pctShown = pctDraft ?? (price > 0 ? String(Math.round(downPct * 10) / 10) : "");
+  const setDownPct = (p: number) => onChange("downPayment", String(Math.round((price * Math.min(100, Math.max(0, p))) / 100)));
+
+  return (
+    <div className="planner">
+      <div className="planner-controls">
+        <div className="planner-row">
+          <div className="planner-head"><b>Estimated property value</b><span>Drag, or type the amount in the box above</span></div>
+          <LoanSlider label="Estimated property value" min={PRICE_MIN} max={PRICE_MAX} step={PRICE_STEP} value={price}
+                      bubble={price > 0 ? money(price) : "Drag to set"} valueText={money(price)}
+                      onChange={(v) => onChange("propertyValue", String(v))} onDone={() => onBlur("propertyValue")} />
+          <span className="planner-scale"><span>{money(PRICE_MIN)}</span><span>{money(PRICE_MAX)}+</span></span>
+        </div>
+
+        <div className="planner-row">
+          <div className="planner-head">
+            <span><b id="planner-down">Down payment</b><span>{price > 0 ? `${money(down)} of ${money(price)}` : "Set the property value first"}</span></span>
+            <label className="planner-pct">
+              <input type="text" inputMode="decimal" aria-labelledby="planner-down" aria-describedby="planner-pct-sign"
+                     value={pctShown} disabled={price <= 0} placeholder="0"
+                     onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setPctDraft(t); if (t !== "" && !Number.isNaN(Number(t))) setDownPct(Number(t)); }}
+                     onBlur={() => { setPctDraft(null); onBlur("downPayment"); }} />
+              <span id="planner-pct-sign">%</span>
+            </label>
+          </div>
+          <LoanSlider label="Down payment percent" min={0} max={DOWN_MAX} step={1} value={downPct} disabled={price <= 0}
+                      bubble={`${Math.round(downPct * 10) / 10}%`} valueText={`${Math.round(downPct)} percent, ${money(down)}`}
+                      onChange={setDownPct} onDone={() => onBlur("downPayment")} />
+          <span className="planner-scale marks" aria-hidden="true">
+            {DOWN_MARKS.map((m) => <span key={m} style={{ left: `${(m / DOWN_MAX) * 100}%`, transform: `translateX(-${(m / DOWN_MAX) * 100}%)` }}>{m}%</span>)}
+          </span>
+        </div>
+      </div>
+
+      <aside className="planner-summary" aria-live="polite">
+        <span className="planner-label">{label}</span>
+        <span className="planner-amount">{money(loan)}</span>
+        <span className="planner-ltv">
+          <span className="planner-ring" style={{ "--v": ltv } as CSSProperties}><span>{ltv}%</span></span>
+          <span><span className="planner-muted">Loan-to-value</span>{price > 0 && <span>You put down <b>{Math.round(downPct * 10) / 10}%</b></span>}</span>
+        </span>
+        {price > 0 && (
+          <span className={`planner-tip ${downPct < 20 || downPct >= 100 ? "warn" : ""}`}>
+            {downPct >= 100 ? "With 100% down there is nothing to borrow. Lower the down payment if you need a mortgage."
+              : downPct < 20 ? "Under 20% down, conventional loans usually add mortgage insurance."
+              : "20% or more down: conventional loans usually skip mortgage insurance."}
+          </span>
+        )}
+      </aside>
+    </div>
   );
 }
 
@@ -390,12 +481,23 @@ function EConsent(props: StepProps & { name: string }) {
 }
 
 /* --------------------------------------------------------------- summary */
+/** Missing items as rows; unanswered declarations collapse into one row instead of fourteen. */
+function missingRows(missing: string[], dictionary: Dictionary): [string, string, string][] {
+  const declarations = missing.filter((m) => !dictionary.fields[m] && m.startsWith("Declaration "));
+  const rows = missing.filter((m) => !declarations.includes(m))
+    .map((m): [string, string, string] => [m, dictionary.fields[m]?.label ?? m, "Still needed"]);
+  if (declarations.length === 1) rows.push([declarations[0], declarations[0], "Still needed"]);
+  if (declarations.length > 1) rows.push(["declarations", "Declarations", `${declarations.length} still need an answer`]);
+  return rows;
+}
+
 function Summary(props: StepProps) {
   const { progress, onGo, dictionary, values } = props;
   if (!progress) return null;
   return (
-    <section style={{ marginTop: 20 }}>
-      <h2 style={{ fontSize: 19, fontWeight: 600 }}>Your application</h2>
+    <section className="summary">
+      <h2 className="summary-title">Your application</h2>
+      <p className="summary-lede">Everything you have entered, section by section. Anything still needed is marked.</p>
       {progress.steps.map((s, i) => (
         <div className="sumsec" key={s.id}>
           <div className="sumsec-h" style={{ cursor: "default" }}>
@@ -404,15 +506,15 @@ function Summary(props: StepProps) {
               ? <span className="chip g"><Icon name="check" />Complete</span>
               : <span className="chip w">{s.missing.length} missing</span>}
             {!s.complete && (
-              <button className="linkish" onClick={() => onGo(i)}>Fix it</button>
+              <button className="summary-fix" onClick={() => onGo(i)}>Fix it<Icon name="chevron" /></button>
             )}
           </div>
           <div className="sumsec-b">
               {Object.entries(dictionary.fields).filter(([name, spec]) => spec.step === s.id && visible(spec, values) && values[name] && !spec.sensitive).map(([name, spec]) => <div className="kv" key={name}><span className="k">{spec.label}</span><span className="v">{spec.widget === "currency" ? money2(num(values[name])) : values[name]}</span></div>)}
-              {s.missing.map((m) => (
-                <div className="kv" key={m}>
-                  <span className="k">{dictionary.fields[m]?.label ?? m}</span>
-                  <span className="v missing">Still needed</span>
+              {missingRows(s.missing, dictionary).map(([key, label, note]) => (
+                <div className="kv" key={key}>
+                  <span className="k">{label}</span>
+                  <span className="v missing">{note}</span>
                 </div>
               ))}
             </div>

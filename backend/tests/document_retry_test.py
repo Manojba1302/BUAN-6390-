@@ -72,6 +72,25 @@ class IncompleteW2RetryTests(unittest.TestCase):
         self.assertFalse(documents._retry_allowed(db,row))
 
 
+class IncompleteReadRetryTests(unittest.TestCase):
+    def rows(self, *names):
+        return [SimpleNamespace(field_name=k, corrected_value=None, value_normalized="value", value_raw="value") for k in names]
+
+    def test_license_without_number_can_be_read_again(self):
+        db=Mock(); db.scalars.return_value.all.return_value=self.rows("full_name","date_of_birth","expiry_date")
+        self.assertTrue(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),status="completed",document_tag="drivers_license")))
+
+    def test_complete_license_and_other_documents_cannot(self):
+        db=Mock(); db.scalars.return_value.all.return_value=self.rows("full_name","date_of_birth","license_number","expiry_date")
+        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),status="completed",document_tag="drivers_license")))
+        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),status="completed",document_tag="other")))
+
+    def test_corrected_value_counts_as_found(self):
+        db=Mock(); rows=self.rows("full_name","date_of_birth","expiry_date")+[SimpleNamespace(field_name="license_number",corrected_value="52224976",value_normalized=None,value_raw=None)]
+        db.scalars.return_value.all.return_value=rows
+        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),status="completed",document_tag="drivers_license")))
+
+
 class ReuseVaultUploadTests(unittest.TestCase):
     def test_upload_attaches_owned_unlinked_copy(self):
         db=Mock(); customer=SimpleNamespace(customer_id=uuid4()); app=uuid4()

@@ -93,7 +93,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
 
   const open = Boolean(fileId);
 
-  const canRetry = !!doc && (doc.status === "failed" || (doc.status === "completed" && doc.document_tag === "w2" && doc.missing_fields.some(f => ["employee_name", "employer_name", "box1_wages"].includes(f))));
+  const canRetry = !!doc && (doc.status === "failed" || (doc.status === "completed" && !!doc.can_retry));
 
   return (
     <>
@@ -107,7 +107,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
               {doc.classification && (
                 <span className={`chip ${doc.classification.outcome === "matched" ? "g" : "w"}`}>
                   <Icon name={doc.classification.outcome === "matched" ? "check" : "alert"} />
-                  {doc.classification.outcome === "matched" ? "Type matched" : "Check this"}
+                  {doc.classification.outcome === "matched" ? "Document type matched" : "Check this"}
                 </span>
               )}
               <button className="panel-close" onClick={onClose} aria-label="Close document review" title="Close"><Icon name="x" /></button>
@@ -139,7 +139,7 @@ export function DocDrawer({ fileId, onClose, onSaved }: {
                   </div>
                 )}
 
-                {canRetry && doc.status === "completed" && <div className="missingbox" role="status"><b>Reading is incomplete</b><p>The document type matched, but key fields were not extracted. Select Retry reading below to read this saved file again.</p></div>}
+                {canRetry && doc.status === "completed" && <div className="missingbox" role="status"><b>Reading is incomplete</b><p>The document type matched, but some key details were not read. Select Retry reading below to read this saved file again. Uploading the same file again reuses this copy.</p></div>}
                 {refreshError && <p role="status" className="hint">We could not check processing progress. Your file is saved; we will keep checking.</p>}
                 {doc.status === "completed" && <>
                 <section className="document-person-review" hidden={!(["drivers_license","w2","paystub","ssn_card"].includes(doc.document_tag) && (!doc.extractions.some(e=>e.field_name==="first_name") || !doc.extractions.some(e=>e.field_name==="last_name")))}>
