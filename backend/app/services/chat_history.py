@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy import select
 from app.db.models import ChatConversation, ChatTurn, Extraction, File
-from app.services import document_answers, chat_privacy
+from app.services import application_chat, document_answers, chat_privacy
 
 
 def owned(db, customer, conversation_id, lock=False):
@@ -85,6 +85,8 @@ def finish(db, customer, turn_id, reply=None, error=None):
 
 
 def follow_up(db, customer, conversation, question, context_after=None):
+    if application_chat.intent(question):
+        return question, None
     if not re.search(r"\b(it|its|that document|this document|same document)\b|^(?:and|also)\b", question, re.I):
         return question, None
     if any(re.search(pattern, question.lower()) for pattern, _ in document_answers.TAGS):

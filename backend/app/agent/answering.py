@@ -20,7 +20,7 @@ from sqlalchemy import select
 from app.db.models import Application, File
 from app.agent import evaluation, streaming, generation
 from embedding_config import MODEL as EMBED_MODEL
-from app.services import document_answers, structured_chat, chat_evidence, chat_tools, document_summaries, chat_privacy, chat_scope, missing_document_fields
+from app.services import application_chat, document_answers, structured_chat, chat_evidence, chat_tools, document_summaries, chat_privacy, chat_scope, missing_document_fields
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def _ask(body, db, customer):
     if not body.question.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ask a question")
     _check_application(db, customer, body.application_id)
-    policy = _policy_reply(body.question)
+    policy = _application_or_policy(body, db, customer)
     if policy is not None:
         return policy
     if _inventory_question(body.question):
@@ -275,3 +275,13 @@ def _restore_source_ids(answer, aliases):
 def _missing_reply(db, customer, application_id, reply):
     evaluation.route("missing_fields")
     return chat_privacy.scoped(db, customer, application_id, reply)
+
+
+def _application_or_policy(body, db, customer):
+    if DECISION.search(body.question):
+        return _decision_reply()
+    reply = application_chat.answer(db, customer, body.application_id, body.question)
+    if reply is not None:
+        evaluation.route("application_status")
+        return reply
+    return _policy_reply(body.question)

@@ -11,7 +11,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.runtime import Runtime
 from app.db.models import File, ChatTurn
-from app.services import document_answers, chat_history
+from app.services import application_chat, document_answers, chat_history
 from app.agent import evaluation
 
 class State(TypedDict, total=False):
@@ -39,7 +39,7 @@ def _resolve(state: State, runtime: Runtime[Context]):
     ctx.resolved = _clarified_question(ctx,state)
     followup = re.search(r"\b(it|its|that document|this document|same document)\b|^(?:and|also)\b",ctx.resolved,re.I)
     explicit = any(re.search(pattern,ctx.resolved,re.I) for pattern,_ in document_answers.TAGS)
-    if followup and not explicit:
+    if followup and not explicit and not application_chat.intent(ctx.resolved):
         files = _files(ctx,state.get("source_ids",[]))
         if len(files) == 1:
             ctx.resolved = ctx.resolved[:max(0,1996-len(files[0].original_name))]+" in "+files[0].original_name
