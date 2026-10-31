@@ -146,11 +146,21 @@ export interface DocumentSummary {
   application_id: string | null;
   application_status: string | null;
   uploaded_at: string | null;
+  /** The vault folder the file shows in. */
+  folder?: string;
+  /** What a stored-only document is, as the customer chose it ("Last Will"). */
+  label?: string | null;
   classification: {
     selected_type: string; detected_type: string; outcome: Outcome;
     evidence: string[]; mixed_document: boolean; model: string;
   } | null;
   has_markdown: boolean;
+  /** 1 for the first version; replacing a document adds a version and keeps the earlier ones. */
+  version?: number;
+  /** Every application this document is attached to (one document can be in several). */
+  applications?: { application_id: string; status: string }[];
+  /** False when part of the text did not reach the search index; Retry reading fixes it. */
+  searchable?: boolean;
 }
 
 export interface ExtractionRow {
@@ -184,4 +194,20 @@ export interface StagedFile {
   status: "local" | "checking" | "done" | "error";
   result: ClassifyResult | null;
   kept: boolean;
+}
+
+export interface VaultFolder {
+  name: string;
+  /** Built-in folders cannot be deleted. */
+  default: boolean;
+  count: number;
+}
+
+export interface ApplicationListItem {
+  application_id: string;
+  status: string;
+  /** loanPurpose from Get started ("Purchase", "Cash-Out Refinance"), once chosen. */
+  purpose?: string | null;
+  current_step?: number;
+  created_at?: string;
 }

@@ -6,6 +6,7 @@ from sqlalchemy import text, select
 from app.db.models import Extraction, File
 from app.services import document_answers
 import field_crypto
+from app.services import attachments
 
 SQL = """
 WITH ranked AS (
@@ -15,7 +16,7 @@ WITH ranked AS (
  ELSE 1-(c.embedding <=> CAST(:vector AS vector)) END AS semantic
  FROM document_chunk c JOIN file f ON f.file_id=c.file_id
  WHERE c.customer_id=CAST(:customer AS uuid) AND f.customer_id=CAST(:customer AS uuid)
- AND f.status='completed' AND (CAST(:application AS uuid) IS NULL OR f.application_id=CAST(:application AS uuid))
+ AND f.status='completed' AND (CAST(:application AS uuid) IS NULL OR EXISTS (SELECT 1 FROM application_document ad WHERE ad.file_id=f.file_id AND ad.application_id=CAST(:application AS uuid)))
 ), lex AS (
  SELECT chunk_id,row_number() OVER(ORDER BY lexical DESC) AS r FROM ranked WHERE lexical>0
 ), sem AS (
@@ -73,7 +74,7 @@ def _field_pages(db, parameters):
     sql = """SELECT e.file_id,e.page,e.field_name,e.corrected_value,e.value_raw,e.value_normalized,f.original_name,f.document_tag
     FROM extraction e JOIN file f ON f.file_id=e.file_id
     WHERE f.customer_id=CAST(:customer AS uuid) AND f.status='completed' AND e.page IS NOT NULL
-    AND (CAST(:application AS uuid) IS NULL OR f.application_id=CAST(:application AS uuid))
+    AND (CAST(:application AS uuid) IS NULL OR EXISTS (SELECT 1 FROM application_document ad WHERE ad.file_id=f.file_id AND ad.application_id=CAST(:application AS uuid)))
     AND to_tsvector('english',replace(e.field_name,'_',' ')||' '||coalesce(e.corrected_value,e.value_normalized,e.value_raw,''))
     @@ websearch_to_tsquery('english',:keywords) LIMIT 8"""
     rows = db.execute(text(sql),parameters).mappings().all()
@@ -104,7 +105,7 @@ def needs_general(db, customer, application_id, question):
         return False
     query = select(File.original_name).where(File.customer_id==customer.customer_id, File.document_tag=="other")
     if application_id is not None:
-        query = query.where(File.application_id==application_id)
+        query = query.where(attachments.attached_to(application_id))
     names = db.scalars(query).all()
     if not names:
         return False

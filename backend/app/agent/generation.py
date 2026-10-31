@@ -1,9 +1,12 @@
 """Selectable chat generation; document extraction and embeddings remain local."""
 import json
+import logging
 import os
 import time
 import httpx
 import ollama
+
+log = logging.getLogger(__name__)
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -64,6 +67,7 @@ def _delta(line):
     if data == "[DONE]":
         return "", True
     item = json.loads(data)
+    _completion_metadata(item)
     if item.get("error"):
         raise GenerationError("OpenRouter could not complete the answer. Please try again.")
     choices = item.get("choices", [])
@@ -109,3 +113,17 @@ def _remote(args):
         callback = args.get("metrics_callback")
         if callback:
             callback(clock[1], time.monotonic() - clock[0])
+
+
+def _completion_metadata(item):
+    """Record completion diagnostics, never prompts, model text or provider error bodies."""
+    for choice in item.get("choices", []):
+        reason = choice.get("finish_reason")
+        if reason:
+            safe = reason if reason in {"stop", "length", "content_filter", "error", "tool_calls"} else "unknown"
+            log.info("openrouter_finish reason=%s", safe)
+    usage = item.get("usage")
+    if isinstance(usage, dict):
+        counts = [usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")]
+        counts = [value if type(value) is int and value >= 0 else None for value in counts]
+        log.info("openrouter_usage prompt=%s completion=%s total=%s", *counts)

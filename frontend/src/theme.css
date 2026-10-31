@@ -972,3 +972,5 @@ html body .app .main .sumsec .k, html body .app .main .sumsec dt, html body .app
 html body .app .main .decl .q { font-weight: 600 !important; color: var(--hf-ink) !important; }
 html body .dr-fields .hint, html body .fieldrow .cap { font-weight: 500 !important; color: var(--hf-text) !important; }
 html body .document-chat .chat-welcome > p, html body .document-chat .chat-prompts small { color: var(--hf-text) !important; font-weight: 500 !important; }
+
+.google-sign-in:empty{display:none}.google-sign-in{margin:16px 0;color:#22403a}.google-sign-in p{font-size:14px}.google-sign-in input{display:block;width:100%;padding:12px;border:1px solid #879b96;border-radius:10px;background:white;color:#0f1e1c}

@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ApplicationField, Asset, Employment, Extraction, File
 
+from app.services import attachments
+
 log = logging.getLogger(__name__)
 
 # document field -> application field, for the plain one-to-one cases
@@ -54,10 +56,10 @@ def apply_pending(db: Session, *, application_id: UUID) -> dict:
     """
     _clear_unconfirmed_identity(db, application_id)
     files = db.scalars(select(File).where(
-        File.application_id == application_id, File.status == "completed")).all()
+        attachments.attached_to(application_id), File.status == "completed")).all()
     totals = {"applied": 0, "skipped": 0, "files": len(files)}
     for file in files:
-        result = apply_file(db, file=file)
+        result = apply_file(db, file=file, application_id=application_id)
         totals["applied"] += result["applied"]
         totals["skipped"] += result["skipped"]
     return totals
@@ -74,8 +76,19 @@ def _clear_unconfirmed_identity(db: Session, application_id: UUID) -> None:
     db.commit()
 
 
-def apply_file(db: Session, *, file: File) -> dict:
-    """Fold one processed file's extractions into the application."""
+class _InApplication:
+    """The same file, seen from one of the applications it is attached to."""
+    def __init__(self, file: File, application_id: UUID):
+        self._file, self.application_id = file, application_id
+
+    def __getattr__(self, name):
+        return getattr(self._file, name)
+
+
+def apply_file(db: Session, *, file: File, application_id: UUID | None = None) -> dict:
+    """Fold one processed file's extractions into an application (its latest one unless named)."""
+    if application_id is not None:
+        file = _InApplication(file, application_id)
     if file.application_id is None:
         return {"applied": 0, "skipped": 0}
 

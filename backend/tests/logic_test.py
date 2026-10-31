@@ -56,7 +56,8 @@ class QueueTests(unittest.TestCase):
         kwargs = conn.channel.return_value.basic_publish.call_args.kwargs
         body = json.loads(kwargs["body"])
         self.assertEqual(body, {"customer_id": str(ids["customer_id"]), "application_id": None,
-                                "file_id": str(ids["file_id"]), "document_tag": "w2", "trace_id": "t1"})
+                                "file_id": str(ids["file_id"]), "document_tag": "w2", "trace_id": "t1",
+                                "mode": "read"})
         self.assertEqual(kwargs["properties"].delivery_mode, 2)
         conn.close.assert_called_once()
 

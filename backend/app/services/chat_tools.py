@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.db.models import File, Extraction
 from app.services import document_answers
 import doc_types
+from app.services import attachments
 
 
 def operands(question):
@@ -41,7 +42,7 @@ def answer(db, customer, application_id, question):
         return None
     query = select(File).where(File.customer_id==customer.customer_id, File.status=="completed")
     if application_id is not None:
-        query = query.where(File.application_id==application_id)
+        query = query.where(attachments.attached_to(application_id))
     files = db.scalars(query).all()
     files = [f for f in files if all(k in (doc_types.get_type(f.document_tag) or {}).get("extract",{}) for k in keys)]
     if not files:

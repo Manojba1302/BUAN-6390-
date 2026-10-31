@@ -36,10 +36,22 @@ class ApplicationChatTests(unittest.TestCase):
         before=applications._missing_documents(self.db,self.app_row)
         self.assertTrue(before)
         item=before[0]
-        for _ in range(item["need"]): self._file(item["document_tag"])
+        files=[self._file(item["document_tag"]) for _ in range(item["need"])]
+        unread=self.ask("What documents do you still need from me?")["answer"]
+        self.assertIn(f"- {item['display_name']}: {item['need']} more needed (0 of {item['need']} read; {item['need']} could not be read)", unread)
+        from app.db.models import Extraction
+        for file in files: self.db.add(Extraction(file_id=file.file_id,field_name="employer_name",value_raw="Example"))
+        self.db.commit()
         result=self.ask("What documents do you still need from me?")
         self.assertNotIn("- "+item["display_name"]+":",result["answer"])
         self.assertIn("checklist",result["answer"])
+
+    def test_files_still_being_read_do_not_count_yet(self):
+        item=applications._missing_documents(self.db,self.app_row)[0]
+        file=self._file(item["document_tag"]);file.status="processing";self.db.commit()
+        counts=applications.document_counts(self.db,self.app_row.application_id,item["document_tag"])
+        self.assertEqual((counts["have"],counts["reading"],counts["unread"]),(0,1,0))
+        self.assertIn("1 still being read",self.ask("What documents do you still need from me?")["answer"])
 
     def test_failed_files_are_not_presented_as_accepted(self):
         file=self._file("paystub");file.status="failed";self.db.commit()

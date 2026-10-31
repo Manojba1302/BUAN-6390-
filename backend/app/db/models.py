@@ -172,6 +172,24 @@ class DocumentMarkdown(Base):
     char_count: Mapped[int | None] = mapped_column(Integer)
 
 
+class ApplicationDocument(Base):
+    """A vault document attached to an application. One document can be in several applications."""
+    __tablename__ = "application_document"
+    application_id: Mapped[UUID] = mapped_column(
+        ForeignKey("application.application_id", ondelete="CASCADE"), primary_key=True)
+    file_id: Mapped[UUID] = mapped_column(ForeignKey("file.file_id", ondelete="CASCADE"), primary_key=True, index=True)
+    attached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DocumentVersion(Base):
+    """This file replaced previous_file_id. The earlier version is kept; the vault shows the newest."""
+    __tablename__ = "document_version"
+    file_id: Mapped[UUID] = mapped_column(ForeignKey("file.file_id", ondelete="CASCADE"), primary_key=True)
+    previous_file_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("file.file_id", ondelete="SET NULL"), unique=True)
+    replaced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_event"
     event_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -234,3 +252,13 @@ class ChatTurn(Base):
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+class GoogleIdentity(Base):
+    __tablename__ = "google_identity"
+    subject: Mapped[str] = mapped_column(Text, primary_key=True)
+    customer_id: Mapped[UUID] = mapped_column(ForeignKey("customer.customer_id"), unique=True)
+
+class GoogleChallenge(Base):
+    __tablename__ = "google_challenge"
+    token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, type ChatReply, type SavedChatTurn } from "./api";
 import { Icon } from "./icons";
+import type { ApplicationListItem } from "./types";
 
 type Reply = ChatReply;
 type Turn = { question: string; reply?: Reply; error?: string; source_status?: Record<string, string>; draft?: string };
 
-export function DocumentChat({ applicationId, minimized, onClose, onUnread, onOpenSource }: {
+export function DocumentChat({ applicationId, minimized, onClose, onUnread, onOpenSource, scope }: {
   applicationId: string; minimized: boolean; onClose: () => void; onUnread: () => void; onOpenSource: (id: string) => void;
+  /** Shown under the header on the vault page, where the customer picks which application to ask about. */
+  scope?: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -120,6 +123,7 @@ export function DocumentChat({ applicationId, minimized, onClose, onUnread, onOp
   }
   return <dialog ref={dialog} className="document-chat chat-workspace" onCancel={event => {event.preventDefault();onClose();}} aria-labelledby="chat-title">
     <header className="chat-header"><span className="assistant-mark"><Icon name="spark" /></span><div><h2 id="chat-title">HomeFlow assistant</h2><p><span className="chat-status-dot" />Your document workspace</p></div><button type="button" className="panel-close" aria-label="Minimize document assistant" title="Minimize chat" onClick={onClose}><span aria-hidden="true">-</span></button></header>
+    {scope}
     <div className="chat-history-tools">
       <div className="chat-conversation-heading"><span className="chat-current-title" title={conversations.find(item => item.conversation_id === conversationId)?.title || "New conversation"}>{conversations.find(item => item.conversation_id === conversationId)?.title || "New conversation"}</span><small><i />{ended ? "Conversation ended" : busy || pending ? "Preparing answer" : "Active conversation"}</small></div>
       <div className="chat-toolbar-actions"><button type="button" aria-label="Conversation history" aria-expanded={showHistory} disabled={busy || loading || pending} onClick={() => {setShowHistory(!showHistory);setShowMenu(false);}}><Icon name="history" /><span>History</span></button>
@@ -142,4 +146,22 @@ export function DocumentChat({ applicationId, minimized, onClose, onUnread, onOp
     </div>
     <footer className="chat-composer">{ended ? <div className="chat-ended" role="status"><strong>{conversationId ? "Conversation ended" : "Conversation deleted"}</strong><p>{conversationId ? "Your messages are saved in History." : "Start a new conversation or open another one from History."}</p><button type="button" className="btn" disabled={loading} onClick={() => void newChat()}>Start conversation</button></div> : <><form onSubmit={event => { event.preventDefault(); void ask(); }}><label className="sr-only" htmlFor="document-question">Ask about your documents</label><textarea id="document-question" rows={2} maxLength={2000} value={question} onChange={event => setQuestion(event.target.value)} placeholder="Ask about your documents…" onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(); } }} /><button type="submit" disabled={busy || loading || pending || !conversationId || !question.trim()} aria-label="Send question"><Icon name="send" /></button></form><div className="chat-footer-actions"><small>Minimize to continue later</small><button type="button" className="chat-end-action" disabled={busy || loading || pending || !conversationId} onClick={() => void endConversation()}>End conversation</button></div></>}</footer>
   </dialog>;
+}
+
+const appRef = (id: string) => `HF-${id.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+
+/** Chat answers only from one application's attached documents, so on the vault page the customer chooses which. */
+export function ChatScope({ applications, value, onChange }: {
+  applications: ApplicationListItem[]; value: string; onChange: (id: string) => void;
+}) {
+  return (
+    <div className="chat-scope">
+      <label htmlFor="chat-scope-app">Asking about</label>
+      <select id="chat-scope-app" value={value} onChange={event => onChange(event.target.value)}>
+        {applications.map(app => <option key={app.application_id} value={app.application_id}>
+          Application {appRef(app.application_id)} · {app.status === "draft" ? "in progress" : app.status}</option>)}
+      </select>
+      <small>Answers come only from documents attached to this application.</small>
+    </div>
+  );
 }

@@ -90,6 +90,9 @@ async function streamChat(id: string, question: string, onDraft: (text: string) 
 
 export interface CustomerProfile { customer_id: string; email: string; first_name: string; last_name: string }
 export const auth = {
+  googleConfig: () => request<{client_id:string}>("/auth/google/config"),
+  googleChallenge: () => request<{nonce:string}>("/auth/google/challenge", {method:"POST"}),
+  googleLogin: (credential:string,password:string) => request<CustomerProfile>("/auth/google/login", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({credential,password})}),
   me: () => request<CustomerProfile>("/auth/me"),
   submit: (route: string, body: Record<string,string>) => request<CustomerProfile & {message?:string}>(`/auth/${route}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}),
   logout: () => request("/auth/logout", {method:"POST"}),
@@ -161,8 +164,9 @@ export const api = {
   deleteDocument: (fileId: string) =>
     request<void>(`/documents/${fileId}/permanent`, { method: "DELETE", headers: headers() }),
 
-  unlink: (fileId: string) =>
-    request<void>(`/documents/${fileId}`, { method: "DELETE", headers: headers() }),
+  /** Remove from one application; the vault copy and any other application keep it. */
+  unlink: (fileId: string, applicationId?: string) =>
+    request<void>(`/documents/${fileId}${applicationId ? `?application_id=${applicationId}` : ""}`, { method: "DELETE", headers: headers() }),
 
   documentTemplates: () => request<{template_id:string;name:string;version:string}[]>("/template-documents"),
   renderTemplate: (applicationId:string,templateId:string) => request<{markdown:string;missing_fields:string[];version:string;pdf_base64:string;pages:string[]}>("/template-documents/render",{...json({application_id:applicationId,template_id:templateId}),method:"POST"}),

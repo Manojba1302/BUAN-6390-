@@ -34,6 +34,11 @@ class RetryDocumentTests(unittest.TestCase):
 
 
 class DuplicateUploadTests(unittest.TestCase):
+    def setUp(self):
+        # A stand-in database cannot answer "is there a newer version?"; these files have none.
+        newer = patch.object(documents.versions, "newer_than", return_value=None)
+        newer.start(); self.addCleanup(newer.stop)
+
     def test_existing_file_response_identifies_its_application(self):
         import asyncio,io
         from fastapi import UploadFile
@@ -62,13 +67,18 @@ class InitialQueueFailureTests(unittest.TestCase):
 
 class IncompleteW2RetryTests(unittest.TestCase):
     def test_incomplete_completed_w2_can_retry(self):
-        db=Mock();db.scalars.return_value.all.return_value=[]
-        row=SimpleNamespace(file_id=uuid4(),status="completed",document_tag="w2")
+        db=Mock();db.scalar.return_value=False;db.scalars.return_value.all.return_value=[]
+        row=SimpleNamespace(file_id=uuid4(),application_id=uuid4(),status="completed",document_tag="w2")
         self.assertTrue(documents._retry_allowed(db,row))
 
+    def test_unattached_vault_w2_is_not_offered_a_retry(self):
+        db=Mock();db.scalar.return_value=False;db.scalars.return_value.all.return_value=[]
+        row=SimpleNamespace(file_id=uuid4(),application_id=None,status="completed",document_tag="w2")
+        self.assertFalse(documents._retry_allowed(db,row))
+
     def test_complete_w2_cannot_retry(self):
-        db=Mock();db.scalars.return_value.all.return_value=[SimpleNamespace(field_name=k,corrected_value=None,value_normalized="value",value_raw="value") for k in ("employee_name","employer_name","box1_wages")]
-        row=SimpleNamespace(file_id=uuid4(),status="completed",document_tag="w2")
+        db=Mock();db.scalar.return_value=False;db.scalars.return_value.all.return_value=[SimpleNamespace(field_name=k,corrected_value=None,value_normalized="value",value_raw="value") for k in ("employee_name","employer_name","box1_wages")]
+        row=SimpleNamespace(file_id=uuid4(),application_id=uuid4(),status="completed",document_tag="w2")
         self.assertFalse(documents._retry_allowed(db,row))
 
 
@@ -77,34 +87,48 @@ class IncompleteReadRetryTests(unittest.TestCase):
         return [SimpleNamespace(field_name=k, corrected_value=None, value_normalized="value", value_raw="value") for k in names]
 
     def test_license_without_number_can_be_read_again(self):
-        db=Mock(); db.scalars.return_value.all.return_value=self.rows("full_name","date_of_birth","expiry_date")
-        self.assertTrue(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),status="completed",document_tag="drivers_license")))
+        db=Mock();db.scalar.return_value=False; db.scalars.return_value.all.return_value=self.rows("full_name","date_of_birth","expiry_date")
+        self.assertTrue(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),application_id=uuid4(),status="completed",document_tag="drivers_license")))
 
     def test_complete_license_and_other_documents_cannot(self):
-        db=Mock(); db.scalars.return_value.all.return_value=self.rows("full_name","date_of_birth","license_number","expiry_date")
-        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),status="completed",document_tag="drivers_license")))
-        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),status="completed",document_tag="other")))
+        db=Mock();db.scalar.return_value=False; db.scalars.return_value.all.return_value=self.rows("full_name","date_of_birth","license_number","expiry_date")
+        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),application_id=uuid4(),status="completed",document_tag="drivers_license")))
+        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),application_id=uuid4(),status="completed",document_tag="other")))
 
     def test_corrected_value_counts_as_found(self):
-        db=Mock(); rows=self.rows("full_name","date_of_birth","expiry_date")+[SimpleNamespace(field_name="license_number",corrected_value="52224976",value_normalized=None,value_raw=None)]
+        db=Mock();db.scalar.return_value=False; rows=self.rows("full_name","date_of_birth","expiry_date")+[SimpleNamespace(field_name="license_number",corrected_value="52224976",value_normalized=None,value_raw=None)]
         db.scalars.return_value.all.return_value=rows
-        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),status="completed",document_tag="drivers_license")))
+        self.assertFalse(documents._retry_allowed(db, SimpleNamespace(file_id=uuid4(),application_id=uuid4(),status="completed",document_tag="drivers_license")))
 
 
 class ReuseVaultUploadTests(unittest.TestCase):
+    def setUp(self):
+        # A stand-in database cannot answer "is there a newer version?"; these files have none.
+        newer = patch.object(documents.versions, "newer_than", return_value=None)
+        newer.start(); self.addCleanup(newer.stop)
+
     def test_upload_attaches_owned_unlinked_copy(self):
         db=Mock(); customer=SimpleNamespace(customer_id=uuid4()); app=uuid4()
         row=SimpleNamespace(file_id=uuid4(),application_id=None,status="completed")
         def attach(*args): row.application_id=app
-        with patch.object(documents,"link_document",side_effect=attach) as link:
+        with patch.object(documents,"link_document",side_effect=attach) as link, \
+             patch.object(documents.attachments,"is_attached",return_value=False):
             result=documents._reuse_upload(db,row,app,customer)
         link.assert_called_once()
         self.assertEqual(result["application_id"],str(app))
         self.assertEqual(result["duplicate_of"],str(row.file_id))
 
-    def test_upload_never_moves_another_app_copy(self):
+    def test_copy_in_another_application_is_attached_here_too(self):
         row=SimpleNamespace(file_id=uuid4(),application_id=uuid4(),status="completed")
-        with patch.object(documents,"link_document") as link:
-            result=documents._reuse_upload(Mock(),row,uuid4(),Mock())
+        with patch.object(documents,"link_document") as link, \
+             patch.object(documents.attachments,"is_attached",return_value=False):
+            documents._reuse_upload(Mock(),row,uuid4(),Mock())
+        link.assert_called_once()        # added to this application; the other one keeps it
+
+    def test_copy_already_in_this_application_is_left_alone(self):
+        row=SimpleNamespace(file_id=uuid4(),application_id=uuid4(),status="completed")
+        with patch.object(documents,"link_document") as link, \
+             patch.object(documents.attachments,"is_attached",return_value=True):
+            result=documents._reuse_upload(Mock(),row,row.application_id,Mock())
         link.assert_not_called()
         self.assertEqual(result["application_id"],str(row.application_id))

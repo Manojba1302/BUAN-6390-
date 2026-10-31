@@ -33,3 +33,15 @@ class ChatPolicyTests(unittest.TestCase):
         context.__exit__ = Mock(return_value=False)
         with patch.object(ollama.httpx,"stream",return_value=context):
             self.assertEqual(ollama._stream_json({"model":"test"},120), {"answer":"found"})
+
+
+class ApplicationScopeTests(unittest.TestCase):
+    def test_chat_without_application_cannot_search_vault(self):
+        from app.agent.answering import _check_application
+        from fastapi import HTTPException
+        from unittest.mock import Mock
+        db = Mock()
+        with self.assertRaises(HTTPException) as raised:
+            _check_application(db, Mock(), None)
+        self.assertEqual(raised.exception.status_code, 400)
+        db.get.assert_not_called()

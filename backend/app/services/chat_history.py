@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from app.db.models import ChatConversation, ChatTurn, Extraction, File
 from app.services import application_chat, document_answers, chat_privacy
+from app.services import attachments
 
 
 def owned(db, customer, conversation_id, lock=False):
@@ -42,7 +43,7 @@ def source_status(db, customer, application_id, versions):
     result = {}
     for file_id, old in versions.items():
         file = db.get(File, UUID(file_id))
-        if file is None or file.customer_id != customer.customer_id or file.application_id != application_id:
+        if file is None or file.customer_id != customer.customer_id or not attachments.is_attached(db, file.file_id, application_id):
             result[file_id] = "unavailable"
         elif fingerprint(db, file) != old:
             result[file_id] = "changed"
@@ -94,7 +95,7 @@ def follow_up(db, customer, conversation, question, context_after=None):
     recent = db.scalar(select(ChatTurn).where(ChatTurn.conversation_id == conversation.conversation_id, ChatTurn.status == "completed").order_by(ChatTurn.created_at.desc()).limit(1))
     if recent is None or not recent.source_versions or (context_after is not None and recent.created_at < context_after):
         return question, _clarify([])
-    files = db.scalars(select(File).where(File.file_id.in_([UUID(key) for key in recent.source_versions]), File.customer_id == customer.customer_id, File.application_id == conversation.application_id)).all()
+    files = db.scalars(select(File).where(File.file_id.in_([UUID(key) for key in recent.source_versions]), File.customer_id == customer.customer_id, attachments.attached_to(conversation.application_id))).all()
     if len(files) != 1:
         return question, _clarify(files)
     return question[:max(0, 1996 - len(files[0].original_name))] + " in " + files[0].original_name, None

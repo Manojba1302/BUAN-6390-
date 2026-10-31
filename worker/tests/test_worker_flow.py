@@ -15,8 +15,9 @@ DOCUMENT = {"pages": [{"text": "Wage and Tax Statement", "image": None, "method"
 
 class FakeDb:
     """Records every db.* call the worker makes, in order."""
-    def __init__(self, record=RECORD, attempts=1):
-        self.calls, self.record, self.attempts = [], record, attempts
+    def __init__(self, record=RECORD, attempts=1, later=None):
+        """later: what fetch_file returns after the first call (a file attached mid-read)."""
+        self.calls, self.record, self.attempts, self.later = [], record, attempts, later
 
     @contextmanager
     def session(self):
@@ -25,43 +26,119 @@ class FakeDb:
     def __getattr__(self, name):
         def call(*args, **kwargs):
             self.calls.append((name, args[1:], kwargs))
-            return {"fetch_file": self.record, "bump_attempts": self.attempts}.get(name)
+            fetched = self.record if self.later is None or name != "fetch_file" or \
+                not any(c[0] == "fetch_file" for c in self.calls[:-1]) else self.later
+            return {"fetch_file": fetched, "bump_attempts": self.attempts}.get(name)
         return call
 
     def names(self):
         return [c[0] for c in self.calls]
 
 
+@contextmanager
+def _nothing():
+    yield
+
+
 class HandleTests(unittest.TestCase):
-    def _run(self, fake, outcome="matched", fields=None):
+    def _run(self, fake, outcome="matched", fields=None, job=None, kept=None, document=None, embed=True):
         fields = {key: {"value": value, "method": "native_text"} for key, value in (("employee_name", "Example Person"), ("employer_name", "Example Employer"), ("box1_wages", "100.00"))} if fields is None else fields
         s3 = MagicMock()
         s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"%PDF")}
+        rendered = {"pages": [{"text": "", "method": "vision", "image": b"png"}]}
         with tempfile.TemporaryDirectory() as folder, \
              patch.object(main, "db", fake), patch.object(main, "_s3", return_value=s3), \
              patch.object(main.config, "markdown_dir", Path(folder)), \
-             patch.object(main.pipeline, "read", return_value=DOCUMENT), \
+             patch.object(main.pipeline, "read", return_value=document or DOCUMENT) as read, \
+             patch.object(main.pages, "read_document", return_value=rendered), \
              patch.object(main.pipeline, "classify", return_value={"detected": "w2", "outcome": outcome}), \
              patch.object(main.pipeline, "extract", return_value=fields) as extract, \
              patch.object(main.pipeline, "to_markdown", return_value="# md"), \
-             patch.object(main.pipeline, "chunk", return_value=["c"]), \
-             patch.object(main.pipeline, "embed_chunks", return_value=[("c", [0.1])]):
-            main.handle({"file_id": "f1"})
-            md_written = (Path(folder) / "f1.md").exists()
-        return extract, md_written
+             patch.object(main.pipeline, "chunk", return_value=[] if document else ["c"]), \
+             (patch.object(main.pipeline, "embed_chunks", return_value=[{"content": "c", "embedding": [0.1]}] if not document else []) if embed else _nothing()):
+            if kept is not None:
+                (Path(folder) / "f1.pages.json").write_text(json.dumps(kept))
+            main.handle(job or {"file_id": "f1"})
+            self.md_written = (Path(folder) / "f1.md").exists()
+            self.pages_kept = json.loads((Path(folder) / "f1.pages.json").read_text()) if (Path(folder) / "f1.pages.json").exists() else None
+        self.read = read
+        return extract, self.md_written
 
-    def test_happy_path_saves_everything_in_order(self):
+    def test_attached_upload_is_read_then_extracted(self):
         fake = FakeDb()
         extract, md_written = self._run(fake)
         self.assertEqual(fake.names(), ["fetch_file", "bump_attempts", "set_status", "save_classification",
-                                        "clear_extractions", "save_extraction", "save_extraction", "save_extraction", "save_markdown",
-                                        "replace_chunks", "set_status", "audit"])
+                                        "clear_extractions", "save_markdown", "replace_chunks", "fetch_file",
+                                        "clear_extractions", "save_extraction", "save_extraction", "save_extraction",
+                                        "save_markdown", "audit", "set_status", "audit"])
         self.assertTrue(md_written)
         extract.assert_called_once()
-        final = fake.calls[10]
+        final = fake.calls[14]
         self.assertEqual((final[1][1], final[2]), ("completed", {"pages": 1}))
-        audit = fake.calls[11]
-        self.assertEqual(audit[2]["payload"], {"fields": 3, "chunks": 1, "outcome": "matched"})
+        self.assertEqual(fake.calls[15][2]["payload"], {"fields": 3, "chunks": 1, "outcome": "matched"})
+        self.assertEqual(self.pages_kept, [{"text": "Wage and Tax Statement", "model_text": None, "method": "native_text", "ocr_confidence": None}])
+
+    def test_vault_upload_is_read_and_searchable_but_not_extracted(self):
+        fake = FakeDb(record={**RECORD, "application_id": None})
+        extract, md_written = self._run(fake)
+        extract.assert_not_called()
+        self.assertNotIn("save_extraction", fake.names())
+        self.assertIn("replace_chunks", fake.names())
+        self.assertTrue(md_written and self.pages_kept)
+        self.assertEqual(fake.calls[-1][2]["payload"], {"fields": 0, "chunks": 1, "outcome": "matched"})
+
+    def test_vault_mismatch_is_saved_as_other_not_refused(self):
+        fake = FakeDb(record={**RECORD, "document_tag": "paystub", "application_id": None})
+        extract, _ = self._run(fake, outcome="mismatched")
+        self.assertIn(("set_tag", ("f1", "other"), {}), fake.calls)
+        self.assertEqual(fake.calls[-2][1][1], "completed")
+        extract.assert_not_called()
+
+    def test_application_mismatch_is_saved_as_other_too_and_not_read_with_the_wrong_fields(self):
+        fake = FakeDb(record={**RECORD, "document_tag": "paystub"}, later={**RECORD, "document_tag": "other"})
+        extract, _ = self._run(fake, outcome="mismatched", fields={})
+        self.assertIn(("set_tag", ("f1", "other"), {}), fake.calls)
+        extract.assert_not_called()
+        self.assertEqual(fake.calls[-2][1][1], "completed")
+
+    def test_attaching_extracts_from_the_kept_text_without_reading_again(self):
+        fake = FakeDb()
+        kept = [{"text": "Box 1 wages 100.00", "method": "ocr", "ocr_confidence": 91.0}]
+        extract, _ = self._run(fake, job={"file_id": "f1", "mode": "extract"}, kept=kept)
+        self.read.assert_not_called()
+        self.assertNotIn("save_classification", fake.names())
+        self.assertNotIn("replace_chunks", fake.names())
+        page = extract.call_args[0][0]["pages"][0]
+        self.assertEqual((page["text"], page["method"], page["image"]), ("Box 1 wages 100.00", "ocr", b"png"))
+        self.assertEqual(fake.calls[-1][2]["payload"], {"fields": 3, "chunks": None, "outcome": "attached"})
+
+    def test_attaching_an_older_file_without_kept_text_reads_it_once(self):
+        fake = FakeDb()
+        extract, _ = self._run(fake, job={"file_id": "f1", "mode": "extract"})
+        self.read.assert_called_once()
+        extract.assert_called_once()
+
+    def test_file_attached_while_it_was_being_read_is_still_extracted(self):
+        fake = FakeDb(record={**RECORD, "application_id": None}, later=RECORD)
+        extract, _ = self._run(fake)
+        extract.assert_called_once()
+        self.assertIn("save_extraction", fake.names())
+
+    def test_photo_with_little_printed_text_is_still_extracted_from_its_image(self):
+        fake = FakeDb(record={**RECORD, "document_tag": "drivers_license"})
+        photo = {"pages": [{"text": "", "method": "vision", "image": b"png"}]}
+        fields = {"full_name": {"value": "Example Person", "method": "vision", "page": 1, "quote": ""}}
+        with patch.object(main.pipeline, "chunk", return_value=[]):
+            extract, _ = self._run(fake, fields=fields, document=photo)
+        extract.assert_called_once()
+        self.assertEqual(fake.calls[-2][1][1], "completed")
+
+    def test_search_index_failure_does_not_block_reading_fields(self):
+        fake = FakeDb()
+        with patch.object(main.pipeline, "embed_chunks", return_value=[{"content": "c", "embedding": None}]):
+            extract, _ = self._run(fake, embed=False)
+        extract.assert_called_once()
+        self.assertEqual(fake.calls[-2][1][1], "completed")
 
     def test_unknown_document_is_not_extracted(self):
         fake = FakeDb()

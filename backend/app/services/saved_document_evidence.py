@@ -17,7 +17,7 @@ def pages(db, file):
 
 
 def recover(db, file):
-    if file.status != "completed":
+    if file.status != "completed" or file.application_id is None:
         return
     source = pages(db, file)
     if not source:

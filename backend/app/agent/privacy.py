@@ -2,6 +2,7 @@
 import re
 from sqlalchemy import select
 from app.db.models import Extraction, File
+from app.services import attachments
 
 SENSITIVE_FIELDS = {"ssn", "employee_ssn", "license_number", "account_mask", "account_number", "employee_id", "date_of_birth"}
 PHONE = re.compile(r"(?<![\w-])(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-](\d{4})(?![\w-])")
@@ -29,7 +30,7 @@ def redact(value, secrets=()):
 def scoped(db, customer, application_id, value):
     query = select(Extraction).join(File).where(File.customer_id == customer.customer_id, Extraction.field_name.in_(SENSITIVE_FIELDS))
     if application_id is not None:
-        query = query.where(File.application_id == application_id)
+        query = query.where(attachments.attached_to(application_id))
     rows = db.scalars(query).all()
     secrets = [str(v).strip() for row in rows for v in (row.value_raw,row.value_normalized,row.corrected_value) if v]
     return redact(value, secrets)

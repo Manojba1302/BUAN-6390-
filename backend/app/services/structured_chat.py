@@ -3,6 +3,7 @@ import re
 from sqlalchemy import select
 from app.db.models import File, Extraction
 from app.services import document_answers as fields
+from app.services import attachments
 
 FIELDS = {
     "name": ("full_name", "employee_name", "account_holder"),
@@ -45,7 +46,7 @@ def answer(db, customer, application_id, question):
 def _files(db, customer, application_id, question, kind):
     query = select(File).where(File.customer_id == customer.customer_id)
     if application_id is not None:
-        query = query.where(File.application_id == application_id)
+        query = query.where(attachments.attached_to(application_id))
     tags = {tag for pattern, tag in fields.TAGS if re.search(pattern, question.lower())}
     tags = tags or ({"paystub"} if kind == "pay" else {"w2", "paystub"} if kind == "employer" else {"w2", "paystub", "bank_statement", "drivers_license"})
     files = db.scalars(query.where(File.document_tag.in_(tags)).order_by(File.uploaded_at.desc())).all()

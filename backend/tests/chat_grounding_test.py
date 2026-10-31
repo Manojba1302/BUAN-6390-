@@ -47,7 +47,8 @@ class ChatGroundingTests(unittest.TestCase):
     def test_chat_generation_is_bounded_and_model_configurable(self):
         from unittest.mock import patch
         from app.api.v1 import chat
-        with patch.object(chat.ollama, "generate_json", return_value={"answer":"Found", "citations":[{"file_id":"owned-file","page":1}]}) as generate:
+        from app.agent import generation
+        with patch.object(generation, "token_limit", return_value=512), patch.object(generation, "generate_json", return_value={"answer":"Found", "citations":[{"file_id":"owned-file","page":1}]}) as generate:
             chat._answer("Summarize", self.sources)
         self.assertEqual(generate.call_args.kwargs["options"]["num_predict"], 512)
         self.assertEqual(generate.call_args.kwargs["model"], chat.ANSWER_MODEL)

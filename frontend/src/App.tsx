@@ -1,19 +1,20 @@
-/** Shell and state. One application, loaded from the API, saved on every step. */
+/** Shell and state. Sign-in lands on the vault; an application is opened from there and saved on every step. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, auth, ApiError } from "./api";
 import { AuthPage } from "./AuthPage";
 import type { CustomerProfile } from "./api";
 import { TemplateDocuments } from "./TemplateDocuments";
-import { DocumentChat } from "./DocumentChat";
+import { ChatScope, DocumentChat } from "./DocumentChat";
 import { DocDrawer } from "./DocDrawer";
-import { DocCard, DocumentsStep, DOCUMENTS_LEDE } from "./Documents";
+import { DocumentsStep, DOCUMENTS_LEDE } from "./Documents";
 import { validate } from "./format";
 import { Icon } from "./icons";
 import { FormStep, type Provenance } from "./Steps";
 import { FootNav, Rail, StepHero, useToast } from "./ui";
+import { VaultHome } from "./VaultHome";
 import type {
-  ApplicationState, ChecklistItem, Dictionary, DocumentSummary, Progress, NameSuggestion, AddressSuggestion, EmploymentSuggestion,
+  ApplicationListItem, ApplicationState, ChecklistItem, Dictionary, DocumentSummary, Progress, NameSuggestion, AddressSuggestion, EmploymentSuggestion,
 } from "./types";
 
 type Rows = Record<string, Record<string, unknown>[]>;
@@ -37,17 +38,20 @@ export function App() {
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [openDoc, setOpenDoc] = useState<string | null>(null);
-  const [vaultOpen, setVaultOpen] = useState(false);
+  const [vaultOpen, setVaultOpen] = useState(true);
+  const [applications, setApplications] = useState<ApplicationListItem[]>([]);
+  const [creating, setCreating] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatStarted, setChatStarted] = useState(false);
   const [chatUnread, setChatUnread] = useState(false);
+  const [vaultChatApp, setVaultChatApp] = useState<string | null>(null);
   const [templateOpen,setTemplateOpen] = useState(false);
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [user, setUser] = useState<CustomerProfile | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const email = user?.email || "";
   useEffect(() => {
-    const expired = () => { setUser(null); setAppId(null); setDictionary(null); setValues({}); setDocuments([]); setNameSuggestions([]); setAddressSuggestions([]); setEmploymentSuggestions([]); setProvenance({}); setDeclarations({}); setRows({employment:[],asset:[],liability:[]}); setCustomerId(null); setProgress(null); dirty.current = false; setUnsaved(false); };
+    const expired = () => { setUser(null); setAppId(null); setDictionary(null); setValues({}); setDocuments([]); setNameSuggestions([]); setAddressSuggestions([]); setEmploymentSuggestions([]); setProvenance({}); setDeclarations({}); setRows({employment:[],asset:[],liability:[]}); setCustomerId(null); setProgress(null); setVaultDocuments([]); setApplications([]); setVaultOpen(true); dirty.current = false; setUnsaved(false); };
     window.addEventListener("homeflow:session-expired", expired);
     if (location.hash.startsWith("#reset=")) setAuthChecked(true);
     else void auth.me().then(setUser).catch(() => setUser(null)).finally(() => setAuthChecked(true));
@@ -91,15 +95,13 @@ export function App() {
     if (!user) return;
     void (async () => {
       try {
-        const [dict, list] = await Promise.all([api.dictionary(), api.checklist()]);
+        const [dict, list, apps, docs] = await Promise.all([api.dictionary(), api.checklist(), api.listApplications(), api.documents()]);
         setDictionary(dict);
         setChecklist(list);
-        const existing = await api.listApplications();
-        const draft = existing.find((a) => a.status === "draft");
-        const id = draft?.application_id ?? (await api.createApplication()).application_id;
-        setAppId(id);
+        setApplications(apps);
+        setVaultDocuments(docs);
       } catch (err) {
-        toast(err instanceof ApiError ? err.message : "We could not start your application.");
+        toast(err instanceof ApiError ? err.message : "We could not open your vault.");
       }
     })();
   }, [toast, user]);
@@ -134,15 +136,59 @@ export function App() {
     });
   }
 
-  useEffect(() => { if (appId) void load(appId).catch(() => {}); }, [appId, load]);
+  /** The vault page: every document the customer has, and their applications. */
+  const refreshVault = useCallback(async () => {
+    const [docs, apps] = await Promise.all([api.documents(), api.listApplications()]);
+    setVaultDocuments(docs); setApplications(apps);
+  }, []);
+
+  /** Open an application from the vault. Nothing from the previous one carries over. */
+  async function openApplication(id: string, at = 0) {
+    dirty.current = false; setUnsaved(false); setErrors({}); setSaveError(""); setJustSaved(false);
+    setChatOpen(false); setChatStarted(false); setChatUnread(false); setSubmitted(null);
+    try {
+      await load(id);
+      setAppId(id); setStep(Math.min(Math.max(0, at), (dictionary?.steps.length ?? 1) - 1)); setVaultOpen(false);
+      window.scrollTo({ top: 0 });
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : "We could not open this application.");
+    }
+  }
+
+  async function createApplication() {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const { application_id } = await api.createApplication();
+      setApplications(await api.listApplications().catch(() => applications));
+      await openApplication(application_id, 0);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : "We could not start a new application.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function showVault() {
+    if (dirty.current && !(await save())) return;
+    setVaultOpen(true);
+    window.scrollTo({ top: 0 });
+    void refreshVault().catch(() => {});
+  }
+
+  /** Reload whatever is on screen after a document changes. */
+  const refresh = () => { if (appId && !vaultOpen) void load(appId).catch(() => {}); else void refreshVault().catch(() => {}); };
 
   /* --------------------------------------------- poll while docs process */
   useEffect(() => {
-    const pending = documents.some((d) => d.status === "queued" || d.status === "processing");
-    if (!pending || !appId) return;
-    const timer = setInterval(() => { void load(appId).catch(() => {}); }, 4000);
+    const busy = (docs: DocumentSummary[]) => docs.some((d) => d.status === "queued" || d.status === "processing");
+    const inApp = !!appId && !vaultOpen;
+    if (inApp ? !busy(documents) : !busy(vaultDocuments)) return;
+    const timer = setInterval(() => {
+      if (inApp && appId) void load(appId).catch(() => {}); else void refreshVault().catch(() => {});
+    }, 4000);
     return () => clearInterval(timer);
-  }, [documents, appId, load]);
+  }, [documents, vaultDocuments, appId, vaultOpen, load, refreshVault]);
 
   /* --------------------------------------------------------- field edits */
   const setValue = (name: string, value: string) => {
@@ -235,6 +281,8 @@ export function App() {
 
   async function goTo(i: number) {
     if (dirty.current && !(await save())) return;
+    // Remember where they are, so reopening the application lands here and not one step back.
+    if (appId && i !== step && applications.some(a => a.application_id === appId && a.status === "draft")) void api.patchApplication(appId, { current_step: i }).catch(() => {});
     setStep(i);
     setVaultOpen(false);
     requestAnimationFrame(() => {
@@ -249,9 +297,14 @@ export function App() {
   if (!authChecked) return <main className="main"><p>Checking your session…</p></main>;
   if (!user) return <AuthPage onAuthenticated={profile => { setUser(profile); setCustomerId(profile.customer_id); }} />;
 
-  if (!dictionary || !appId || !stepSpec) {
-    return <div className="body"><main className="main"><p className="lede">Loading your application…</p></main></div>;
+  if (!dictionary) {
+    return <div className="body"><main className="main"><p className="lede">Opening your vault…</p></main></div>;
   }
+  const inApplication = !vaultOpen && !!appId && !!stepSpec;
+  // Chat is customer chat on both pages (Vijay, Oct 2026). It answers from one application's documents:
+  // inside an application that one; on the vault page the one chosen, else the last opened, else the newest.
+  const known = (id: string | null) => !!id && applications.some(a => a.application_id === id);
+  const chatAppId = inApplication ? appId : known(vaultChatApp) ? vaultChatApp : known(appId) ? appId : applications[0]?.application_id ?? null;
 
   if (submitted) {
     return (
@@ -270,6 +323,9 @@ export function App() {
               documents needs a second look, and your documents stay in your vault.
             </p>
             <p className="hint" style={{ marginTop: 22 }}>Reference {submitted}</p>
+            <button className="btn" style={{ marginTop: 18 }} onClick={() => { setSubmitted(null); setAppId(null); setVaultOpen(true); void refreshVault().catch(() => {}); }}>
+              <Icon name="folder" />Back to my vault
+            </button>
           </section>
         </main>
       </div>
@@ -285,15 +341,19 @@ export function App() {
             <span>HomeFlow<small>Your path home</small></span>
           </div>
           <div className="spacer" />
-          <button className="ghost" onClick={async () => { if (dirty.current && !(await save())) return; setVaultOpen((v) => !v); }}>
-            <Icon name="folder" /><span>{vaultOpen ? "Back to application" : "My vault"}</span>
-          </button>
+          {inApplication ? <button className="ghost" onClick={() => void showVault()}><Icon name="folder" /><span>My vault</span></button>
+            : appId && applications.some(a => a.application_id === appId && a.status === "draft") && <button className="ghost" onClick={() => void openApplication(appId, step)}><Icon name="home" /><span>Back to application</span></button>}
           <details className="header-menu" ref={notificationMenu} onToggle={e => { if (e.currentTarget.open && profileMenu.current) profileMenu.current.open = false; }}>
             <summary aria-label="Notifications"><Icon name="bell" /></summary>
             <section className="header-popover" aria-label="Application notifications">
-              <h2>Application updates</h2>
-              <p>{unsaved ? "You have unsaved answers. Save and continue to keep your progress." : "Your latest application answers are saved."}</p>
-              <p>{documents.length ? `${documents.length} document${documents.length === 1 ? "" : "s"} attached to your application. Open My vault to review their status.` : "No documents uploaded yet. Visit Documents to see what to provide."}</p>
+              <h2>{inApplication ? "Application updates" : "Vault updates"}</h2>
+              {inApplication ? <>
+                <p>{unsaved ? "You have unsaved answers. Save and continue to keep your progress." : "Your latest application answers are saved."}</p>
+                <p>{documents.length ? `${documents.length} document${documents.length === 1 ? "" : "s"} attached to your application. Open My vault to review their status.` : "No documents uploaded yet. Visit Documents to see what to provide."}</p>
+              </> : <>
+                <p>{vaultDocuments.length ? `${vaultDocuments.length} document${vaultDocuments.length === 1 ? "" : "s"} saved in your vault.` : "Your vault is empty. Add a document to keep it safe here."}</p>
+                <p>{applications.some(a => a.status === "draft") ? "You have an application in progress. Continue it from the top of your vault." : "No application in progress. Choose Create new application when you are ready."}</p>
+              </>}
             </section>
           </details>
           <details className="header-menu profile-menu" ref={profileMenu} onToggle={e => { if (e.currentTarget.open && notificationMenu.current) notificationMenu.current.open = false; }}>
@@ -307,7 +367,7 @@ export function App() {
                   <div className="profile-account-reference"><small>Account reference</small><p className="profile-reference">{customerId || user.customer_id}</p></div>
                 </div>
               </details>
-              {appId && (() => {
+              {inApplication && appId && (() => {
                 const reference = `HF-${appId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
                 return (
                   <div className="profile-app-id">
@@ -319,9 +379,9 @@ export function App() {
                   </div>
                 );
               })()}
-              <button className="profile-action" onClick={e => { e.currentTarget.closest("details")?.removeAttribute("open"); void goTo(2); }}><Icon name="user" /><span>Personal information</span><Icon name="chevron" /></button>
-              <button className="profile-action" onClick={async e => { const menu = e.currentTarget.closest("details"); if (dirty.current && !(await save())) return; setVaultOpen(true); menu?.removeAttribute("open"); }}><Icon name="folder" /><span>My vault</span><Icon name="chevron" /></button>
-              <button className="profile-action" onClick={async e=>{const menu=e.currentTarget.closest("details");if(dirty.current&&!(await save()))return;menu?.removeAttribute("open");setTemplateOpen(true);}}><Icon name="doc"/><span>Generate document (POC)</span><Icon name="chevron"/></button>
+              {inApplication && <button className="profile-action" onClick={e => { e.currentTarget.closest("details")?.removeAttribute("open"); void goTo(2); }}><Icon name="user" /><span>Personal information</span><Icon name="chevron" /></button>}
+              <button className="profile-action" onClick={e => { e.currentTarget.closest("details")?.removeAttribute("open"); void showVault(); }}><Icon name="folder" /><span>My vault</span><Icon name="chevron" /></button>
+              {inApplication && <button className="profile-action" onClick={async e=>{const menu=e.currentTarget.closest("details");if(dirty.current&&!(await save()))return;menu?.removeAttribute("open");setTemplateOpen(true);}}><Icon name="doc"/><span>Generate document (POC)</span><Icon name="chevron"/></button>}
               <button className="profile-action logout" onClick={async () => { if (dirty.current && !(await save())) return; try { await auth.logout(); window.location.reload(); } catch { toast("Could not log out. Please try again."); } }}><Icon name="logout" /><span>Log out</span></button>
             </section>
           </details>
@@ -329,13 +389,17 @@ export function App() {
       </header>
 
 
-      <div className="body">
-        <Rail dictionary={dictionary} progress={progress} step={step} onGo={goTo} />
+      <div className={`body ${inApplication ? "" : "vault-body"}`}>
+        {inApplication && <Rail dictionary={dictionary} progress={progress} step={step} onGo={goTo} />}
         <main className="main" ref={main} tabIndex={-1}>
-          <p className="application-title">{vaultOpen ? "HomeFlow · Document library" : "My Loan Application"}</p>
-          {vaultOpen ? (
-            <Vault documents={vaultDocuments} onOpen={setOpenDoc} applicationId={appId} onChanged={() => void load(appId)} />
-          ) : stepSpec.id === "documents" ? (
+          {!inApplication || !appId || !stepSpec ? (
+            <VaultHome firstName={user.first_name || undefined} documents={vaultDocuments} applications={applications} creating={creating}
+                       onOpen={setOpenDoc} onChanged={() => void refreshVault().catch(() => {})}
+                       onCreateApplication={() => void createApplication()}
+                       onContinue={a => void openApplication(a.application_id, a.current_step ?? 0)} />
+          ) : <>
+          <p className="application-title">My Loan Application · {`HF-${appId.replaceAll("-", "").slice(0, 8).toUpperCase()}`}</p>
+          {stepSpec.id === "documents" ? (
             <DocumentsStep applicationId={appId} checklist={checklist.map(c => ["Self-employed", "Retired", "Not currently employed", "Other"].includes(values.employmentStatus) && ["w2", "paystub"].includes(c.document_tag) ? { ...c, required_count: 0, guidance: "Optional for your current employment situation. You can still upload this document if it applies to you." } : c)} documents={documents} vaultDocuments={vaultDocuments}
                            header={<StepHero dictionary={dictionary} step={step} title="Your documents" lede={DOCUMENTS_LEDE} />}
                            onUploaded={() => void load(appId)} onOpenDoc={setOpenDoc} />
@@ -361,67 +425,20 @@ export function App() {
                       onRows={(kind, next) => { markDirty(); setRows((r) => ({ ...r, [kind]: next })); }}
                       onOpenSource={setOpenDoc} />
           )}
-          {!vaultOpen && <FootNav step={step} lastStep={step === dictionary.steps.length - 1}
+          <FootNav step={step} lastStep={step === dictionary.steps.length - 1}
                blocking={blocking} busy={busy} unsaved={unsaved} justSaved={justSaved} saveError={saveError}
-               onBack={() => goTo(Math.max(0, step - 1))} onNext={() => void next()} />}
+               onBack={() => goTo(Math.max(0, step - 1))} onNext={() => void next()} />
+          </>}
         </main>
       </div>
 
-
-
-      {!chatOpen && !openDoc && <button className="assistant-launcher" type="button" aria-label={chatUnread ? "New reply from HomeFlow - open chat" : chatStarted ? "Resume HomeFlow conversation" : "Ask HomeFlow about your documents"} onClick={() => {setChatStarted(true);setChatOpen(true);setChatUnread(false);}}><Icon name="chat" /><span className="assistant-launcher-label">{chatUnread ? "New reply" : chatStarted ? "Resume chat" : "Ask HomeFlow"}</span>{chatUnread ? <span className="chat-unread-badge" role="status" aria-label="Unread reply">1</span> : chatStarted && <span className="chat-active-dot" aria-label="Conversation active" />}</button>}
-      {templateOpen && <TemplateDocuments applicationId={appId} onClose={()=>setTemplateOpen(false)}/>}
-      {chatStarted && <DocumentChat key={appId} applicationId={appId} minimized={!chatOpen || !!openDoc} onUnread={() => setChatUnread(true)} onClose={() => setChatOpen(false)} onOpenSource={setOpenDoc} />}
+      {chatAppId && !chatOpen && !openDoc && <button className="assistant-launcher" type="button" aria-label={chatUnread ? "New reply from HomeFlow - open chat" : chatStarted ? "Resume HomeFlow conversation" : "Ask HomeFlow about your documents"} onClick={() => {setChatStarted(true);setChatOpen(true);setChatUnread(false);}}><Icon name="chat" /><span className="assistant-launcher-label">{chatUnread ? "New reply" : chatStarted ? "Resume chat" : "Ask HomeFlow"}</span>{chatUnread ? <span className="chat-unread-badge" role="status" aria-label="Unread reply">1</span> : chatStarted && <span className="chat-active-dot" aria-label="Conversation active" />}</button>}
+      {templateOpen && appId && <TemplateDocuments applicationId={appId} onClose={()=>setTemplateOpen(false)}/>}
+      {chatStarted && chatAppId && <DocumentChat key={chatAppId} applicationId={chatAppId} minimized={!chatOpen || !!openDoc}
+        onUnread={() => setChatUnread(true)} onClose={() => setChatOpen(false)} onOpenSource={setOpenDoc}
+        scope={inApplication ? undefined : <ChatScope applications={applications} value={chatAppId} onChange={setVaultChatApp} />} />}
       <DocDrawer fileId={openDoc} onClose={() => setOpenDoc(null)}
-                 onSaved={() => void load(appId)} />
+                 onSaved={refresh} />
     </div>
   );
 }
-
-function Vault({ documents, onOpen, applicationId, onChanged }: {
-  documents: DocumentSummary[]; onOpen: (id: string) => void; applicationId: string; onChanged: () => void;
-}) {
-  const [filter, setFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const tags = Array.from(new Set(documents.map((d) => d.document_tag)));
-  const shown = documents.filter(d => (filter === "all" || d.document_tag === filter) && `${d.original_name} ${d.display_name}`.toLowerCase().includes(search.toLowerCase()));
-
-  return (
-    <>
-      <p className="eyebrow">Your vault</p>
-      <h1 className="h1">My vault</h1>
-      <p className="lede">
-        All documents in your customer account, across applications. Select a document to review its details.
-      </p>
-      <div className="f" style={{ marginTop: 22 }}>
-        <label className="cap" htmlFor="vault-search">Find a document</label>
-        <input id="vault-search" className="ctl" type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by file name or document type" />
-      </div>
-      <div className="filters">
-        <button className={`fchip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
-          All ({documents.length})
-        </button>
-        {tags.map((t) => (
-          <button key={t} className={`fchip ${filter === t ? "on" : ""}`} onClick={() => setFilter(t)}>
-            {documents.find((d) => d.document_tag === t)?.display_name}{" "}
-            ({documents.filter((d) => d.document_tag === t).length})
-          </button>
-        ))}
-      </div>
-      {shown.length ? (
-        <div className="vaultgrid">
-          {[{label:"Identity",tags:["drivers_license","ssn_card"]},{label:"Income",tags:["w2","paystub"]},{label:"Banking",tags:["bank_statement"]},{label:"Other documents",tags:tags.filter(t => !["drivers_license","ssn_card","w2","paystub","bank_statement"].includes(t))}].map(group => { const items = shown.filter(d => group.tags.includes(d.document_tag)); return items.length ? <section className="vault-group" key={group.label}><h2>{group.label}<span>{items.length}</span></h2><div className="vault-group-grid">{items.map(d => <DocCard key={d.file_id} doc={d} onOpen={onOpen} mode="vault" applicationId={applicationId} onChanged={onChanged} />)}</div></section> : null; })}
-        </div>
-      ) : (
-        <section className="card">
-          <p className="hint">
-            {documents.length ? "No documents match your search. Try another name or type." : "Nothing here yet. Upload documents in the Documents section to see them here."}
-          </p>
-        </section>
-      )}
-    </>
-  );
-}
-
-
-

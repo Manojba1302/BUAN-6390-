@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { auth } from "./api";
+import { GoogleSignIn } from "./GoogleSignIn";
 import { Icon } from "./icons";
 import type { CustomerProfile } from "./api";
 
@@ -49,6 +50,7 @@ export function AuthPage({onAuthenticated}:{onAuthenticated:(user:CustomerProfil
     <main className="main">
       <div className="auth-content"><p className="eyebrow">HOME STARTS WITH YOU</p><h1 className="h1">{title}</h1><p className="lede">{mode==="forgot-password" ? "Enter your email and we’ll send a password reset link." : mode==="reset-password" ? "Choose a new password for your HomeFlow account." : "One account. Everything you need for your home journey."}</p>
       {(mode==="login"||mode==="register")&&<div className="auth-tabs" aria-label="Account options"><button type="button" aria-pressed={mode==="login"} disabled={busy} onClick={()=>change("login")}>Sign in</button><button type="button" aria-pressed={mode==="register"} disabled={busy} onClick={()=>change("register")}>Create account</button></div>}
+      {(mode==="login"||mode==="register")&&<GoogleSignIn onAuthenticated={onAuthenticated}/>}
       <form className="card auth-form" onSubmit={submit}>
         {mode === "register" && <div className="grid g2"><label className="f">First name<input className="ctl" autoComplete="given-name" required maxLength={80} value={first} onChange={e=>setFirst(e.target.value)}/></label><label className="f">Last name<input className="ctl" autoComplete="family-name" required maxLength={80} value={last} onChange={e=>setLast(e.target.value)}/></label></div>}
         {mode !== "reset-password" && <label className="f">Email address<input className="ctl" type="email" autoComplete="email" placeholder="you@example.com" required value={email} onChange={e=>setEmail(e.target.value)}/></label>}

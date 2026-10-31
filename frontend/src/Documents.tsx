@@ -6,6 +6,7 @@ import { bytes } from "./format";
 import { CATEGORY_ICON, Icon } from "./icons";
 import { useToast } from "./ui";
 import type { ChecklistItem, DocumentSummary, StagedFile } from "./types";
+import { kindOf, LOAN_TYPES, vault } from "./vault";
 
 const TYPE_LABELS: Record<string, string> = {
   w2: "W-2", paystub: "Pay stub", bank_statement: "Bank statement", drivers_license: "Driver's license",
@@ -23,7 +24,9 @@ interface Props {
   header?: ReactNode;
 }
 
-type CatState = { have: number; need: number; flagged: boolean; satisfied: boolean };
+/** have counts documents that were read (fields pulled out); uploads still being read or not readable do not count yet. */
+type CatState = { have: number; need: number; uploaded: number; reading: number; unread: number; flagged: boolean; satisfied: boolean };
+const wasRead = (d: DocumentSummary) => d.status === "completed" && d.extracted_field_count > 0;
 
 export const DOCUMENTS_LEDE = "Choose what a file is before you pick it, so we can tell you straight away if something looks wrong. Preview stays on your device until you press Submit. We then check the document type and save accepted files.";
 
@@ -49,9 +52,12 @@ export function DocumentsStep(props: Props) {
   const state = (tag: string): CatState => {
     const mine = documents.filter((d) => d.document_tag === tag);
     const need = checklist.find((c) => c.document_tag === tag)?.required_count ?? 1;
-    const flagged = mine.some((d) => d.classification &&
-      d.classification.outcome !== "matched");
-    return { have: mine.length, need, flagged, satisfied: mine.length > 0 && mine.length >= need };
+    const have = mine.filter(wasRead).length;
+    const reading = mine.filter((d) => ["uploaded", "queued", "processing"].includes(d.status)).length;
+    const unread = mine.length - have - reading;
+    const flagged = unread > 0 || mine.some((d) => d.classification &&
+      d.classification.outcome !== "matched" && d.classification.detected_type !== d.document_tag);
+    return { have, need, uploaded: mine.length, reading, unread, flagged, satisfied: have > 0 && have >= need };
   };
 
   const missing = checklist.filter((c) => c.required_count > 0 && !state(c.document_tag).satisfied);
@@ -157,19 +163,21 @@ export function DocumentsStep(props: Props) {
           {checklist.map((c) => {
             const s = state(c.document_tag);
             const cls = s.flagged ? "warn" : s.satisfied ? "ok" : "";
-            const fill = s.have ? "has" : s.need ? "needed" : "optional";
+            const fill = s.uploaded ? "has" : s.need ? "needed" : "optional";
+            const extra = [s.reading ? `${s.reading} being read` : "", s.unread ? `${s.unread} could not be read` : ""].filter(Boolean).join(" · ");
             return (
               <button key={c.document_tag} className={`doctile ${cls} ${fill} doctype-${c.document_tag}`}
                       onClick={() => { setActiveCat(c.document_tag); discard(); }}>
-                <span className="tile-art" aria-hidden="true">{s.have ? <TileArt tag={c.document_tag} /> : <Icon name="plus" />}</span>
+                <span className="tile-art" aria-hidden="true">{s.uploaded ? <TileArt tag={c.document_tag} /> : <Icon name="plus" />}</span>
                 <span className="ti"><Icon name={CATEGORY_ICON[c.document_tag] ?? "doc"} /></span>
                 <span className="tt">
                   <b>{c.display_name}</b>
-                  <small className="document-guidance">{c.guidance}</small><span>{s.have ? (s.need ? `${s.have} of ${s.need} uploaded` : `${s.have} uploaded`) : (s.need ? `0 of ${s.need} uploaded` : "No files uploaded")}</span>
+                  <small className="document-guidance">{c.guidance}</small><span>{s.uploaded ? (s.need ? `${s.have} of ${s.need} read` : `${s.have} read`) : (s.need ? `0 of ${s.need} uploaded` : "No files uploaded")}{extra ? ` · ${extra}` : ""}</span>
                 </span>
                 {s.flagged ? <span className="chip w"><Icon name="alert" />Needs a look</span>
-                  : s.satisfied ? <span className="chip g"><Icon name="check" />Uploaded</span>
-                  : s.have ? <span className="chip a">{s.have} of {s.need}</span>
+                  : s.satisfied ? <span className="chip g"><Icon name="check" />Read</span>
+                  : s.reading ? <span className="chip n">Reading…</span>
+                  : s.uploaded ? <span className="chip a">{s.have} of {s.need}</span>
                   : <span className="chip n">{s.need ? "Required" : "Optional"}</span>}
                 <span className="go"><Icon name="chevron" /></span>
               </button>
@@ -202,6 +210,10 @@ export function DocumentsStep(props: Props) {
               </button>
             </div>
           </div>
+
+          <VaultPicker documents={props.vaultDocuments} tag={activeCat} applicationId={applicationId} compact
+                       onOpen={id => { setActiveCat(null); discard(); onOpenDoc(id); }}
+                       onAttached={() => { onUploaded(); setActiveCat(null); discard(); }} />
 
           <input ref={fileInput} type="file" className="sr-only" multiple
                  accept=".pdf,image/*" onChange={(e) => { void stage(e.target.files); e.target.value = ""; }} />
@@ -246,12 +258,9 @@ export function DocumentsStep(props: Props) {
 
       <section className="card">
         <h2>Use a document from My Vault</h2>
-        <p className="hint">Reuse an existing document without uploading another copy.</p>
-        <button className="btn sec" onClick={() => setShowVault(!showVault)}>{showVault ? "Hide vault documents" : "Choose from My Vault"}</button>
-        {showVault && <div className="vaultgrid" style={{marginTop:16}}>
-          {props.vaultDocuments.filter(d => !d.application_id).map(d => <DocCard key={d.file_id} doc={d} onOpen={onOpenDoc} mode="vault" applicationId={applicationId} onChanged={onUploaded} />)}
-          {!props.vaultDocuments.some(d => !d.application_id) && <p className="hint">No unattached documents yet. Documents removed from this application will appear here.</p>}
-        </div>}
+        <p className="hint">Attach a file you already keep in your vault. No second copy is uploaded.</p>
+        <button className="btn sec" onClick={() => setShowVault(!showVault)}><Icon name="folder" />{showVault ? "Hide vault documents" : "Choose from My Vault"}</button>
+        {showVault && <VaultPicker documents={props.vaultDocuments} applicationId={applicationId} onOpen={onOpenDoc} onAttached={onUploaded} />}
       </section>
 
       {documents.length > 0 && (
@@ -266,6 +275,45 @@ export function DocumentsStep(props: Props) {
         </section>
       )}
     </>
+  );
+}
+
+/** The applications a document is in (older API answers only carry the latest one). */
+export function applicationsOf(doc: DocumentSummary) {
+  return doc.applications ?? (doc.application_id ? [{ application_id: doc.application_id, status: doc.application_status ?? "draft" }] : []);
+}
+export const isIn = (doc: DocumentSummary, applicationId?: string) => !!applicationId && applicationsOf(doc).some(a => a.application_id === applicationId);
+
+/** Vault files not yet in this application, ready to attach (they may be in another one too). With a tag, files of that type come first. */
+function VaultPicker({ documents, tag, applicationId, compact, onOpen, onAttached }: {
+  documents: DocumentSummary[]; tag?: string; applicationId: string; compact?: boolean;
+  onOpen: (id: string) => void; onAttached: () => void;
+}) {
+  const [all, setAll] = useState(!tag);
+  const [working, setWorking] = useState<string | null>(null);
+  const toast = useToast();
+  const free = documents.filter(d => !isIn(d, applicationId));
+  const shown = all ? free : free.filter(d => d.document_tag === tag);
+  if (compact && !free.length) return null;
+  async function attach(doc: DocumentSummary) {
+    setWorking(doc.file_id);
+    try { await api.linkDocument(doc.file_id, applicationId); toast(`${doc.original_name} attached from your vault`, "ok"); onAttached(); }
+    catch (e) { toast(e instanceof ApiError ? e.message : "Could not attach this document."); }
+    finally { setWorking(null); }
+  }
+  return (
+    <div className={`vault-pick ${compact ? "compact" : ""}`}>
+      {compact && <p className="vault-pick-or"><span>or attach from your vault</span></p>}
+      {shown.length ? <ul>{shown.map(d => (
+        <li key={d.file_id}>
+          <span className="vp-ic"><Icon name={CATEGORY_ICON[d.document_tag] ?? "doc"} /></span>
+          <button type="button" className="vp-name" onClick={() => onOpen(d.file_id)}><b>{d.original_name}</b><small>{d.label ?? d.display_name} · {d.folder ?? "Vault"}</small></button>
+          <button type="button" className="btn sec" disabled={!!working} onClick={() => void attach(d)}><Icon name="plus" />{working === d.file_id ? "Attaching…" : "Attach"}</button>
+        </li>))}</ul>
+        : <p className="hint">{free.length ? "No vault files of this type yet." : "Every file in your vault is already in this application. Files you add from the vault page appear here."}</p>}
+      {tag && free.length > shown.length && <button type="button" className="linkbtn" onClick={() => setAll(true)}>Show all {free.length} vault files</button>}
+      <p className="footnote">A file can be in more than one application. Attaching it here does not remove it from another one.</p>
+    </div>
   );
 }
 
@@ -314,10 +362,15 @@ function StagedRow({ item, onKeep, onRemove, checklist, onCategory }: {
                   Retake the photo on a flat surface, with no glare, and all four corners inside the frame.
                 </div>
               )}
+              {r.outcome === "mismatched" && !item.kept && (
+                <p className="hint">If you upload it anyway, it is saved in your vault as Other and does not count as {checklist.find(c => c.document_tag === item.cat)?.display_name ?? "this type"}. You can change its type later.</p>
+              )}
               {(r.outcome === "mismatched" || r.outcome === "unknown" || r.outcome === "failed") && !item.kept && (
                 <div className="sitem-act">
+                  {r.outcome === "mismatched" && checklist.some(c => c.document_tag === r.detected_type) &&
+                    <button className="btn" onClick={() => onCategory(r.detected_type)}>Use {checklist.find(c => c.document_tag === r.detected_type)?.display_name} instead</button>}
                   <button className="btn sec" onClick={onRemove}>Choose a different file</button>
-                  <button className="btn sec" onClick={onKeep}>Upload it anyway</button>
+                  <button className="btn sec" onClick={onKeep}>{r.outcome === "mismatched" ? "Upload anyway, as Other" : "Upload it anyway"}</button>
                 </div>
               )}
             </>
@@ -335,15 +388,18 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
 }) {
   const [working, setWorking] = useState(false);
   const toast = useToast();
-  const locked = Boolean(doc.application_status && doc.application_status !== "draft");
+  const apps = applicationsOf(doc);
+  // In an application, what matters is that application; in the vault, whether any of them was submitted.
+  const locked = mode === "application" ? apps.some(a => a.application_id === applicationId && a.status !== "draft")
+    : apps.some(a => a.status !== "draft");
   async function act(action: "remove" | "delete" | "link") {
     const message = action === "remove"
       ? `Remove "${doc.original_name}" from this application? It stays in My Vault. Unconfirmed pre-filled values from this file will be removed.`
-      : `Permanently delete "${doc.original_name}" from My Vault? ${doc.application_id ? "It will also be removed from its draft application. " : ""}The file, extracted data and document index will be deleted. This cannot be undone.`;
+      : `Permanently delete "${doc.original_name}" from My Vault? ${apps.length ? `It will also be removed from ${apps.length === 1 ? "its application" : `all ${apps.length} applications it is in`}, including submitted ones. ` : ""}The file, extracted data and document index will be deleted. This cannot be undone.`;
     if (action !== "link" && !window.confirm(message)) return;
     setWorking(true);
     try {
-      if(action === "remove") await api.unlink(doc.file_id);
+      if(action === "remove") await api.unlink(doc.file_id, applicationId);
       else if(action === "delete") await api.deleteDocument(doc.file_id);
       else if(applicationId) await api.linkDocument(doc.file_id, applicationId);
       toast(action === "remove" ? "Removed from application. Your vault copy is kept." : action === "delete" ? "Document permanently deleted." : "Document added to application.", "ok");
@@ -351,19 +407,15 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
     } catch(e) { toast(e instanceof ApiError ? e.message : "Could not update this document."); }
     finally { setWorking(false); }
   }
-  const outcome = doc.classification?.outcome;
-  const chip =
-    doc.status === "processing" || doc.status === "queued"
-      ? <span className="chip n">Reading it now</span>
-      : doc.status === "failed"
-      ? <span className="chip r"><Icon name="alert" />Could not read</span>
-      : doc.status === "completed" && doc.missing_field_count > 0
-      ? <span className="chip w"><Icon name="alert" />Fields need review</span>
-      : outcome === "matched"
-      ? <span className="chip g"><Icon name="check" />Document type matched</span>
-      : outcome
-      ? <span className="chip w"><Icon name="alert" />Needs a look</span>
-      : <span className="chip n">Stored</span>;
+  const chip = <DocStatus doc={doc} />;
+  const cls = doc.classification;
+  const suggested = doc.document_tag === "other" && cls?.outcome === "mismatched" && LOAN_TYPES.includes(cls.detected_type) ? cls.detected_type : null;
+  async function retype(tag: string) {
+    setWorking(true);
+    try { await vault.changeType(doc.file_id, tag); toast(`Saved as ${kindOf(tag).name}. We are reading its details now.`, "ok"); onChanged?.(); }
+    catch (e) { toast(e instanceof ApiError ? e.message : "Could not change the type."); }
+    finally { setWorking(false); }
+  }
 
   return (
     <div className={`document-card document-type-${doc.document_tag}`}>
@@ -371,7 +423,7 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
       <span className="vt"><Icon name={CATEGORY_ICON[doc.document_tag] ?? "doc"} /></span>
       <span className="vb">
         <b title={doc.original_name}>{doc.original_name}</b>
-        <span>{doc.display_name} &middot; {bytes(doc.size_bytes)}</span>
+        <span>{doc.label ?? doc.display_name} &middot; {bytes(doc.size_bytes)}</span>
         {doc.classification && <span>AI detected: {TYPE_LABELS[doc.classification.detected_type] ?? doc.classification.detected_type.replaceAll("_", " ")}</span>}
         <span>{doc.extracted_field_count} fields read{doc.missing_field_count > 0 ? ` · ${doc.missing_field_count} missing` : ""}</span>
         <span style={{ display: "block", marginTop: 8 }}>{chip}</span>
@@ -379,15 +431,33 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
     </button>
     {mode && <div className="document-actions">
       <button className="btn sec doc-preview-action" onClick={() => onOpen(doc.file_id)}><Icon name="eye" />Preview</button>
+      {mode === "application" && suggested && !locked && <button className="btn" disabled={working} onClick={() => void retype(suggested)}>Make it a {kindOf(suggested).name}</button>}
       {mode === "application" ? <button className="btn sec" disabled={working || locked} onClick={() => void act("remove")}><Icon name="x" />Remove from application</button>
         : <>
-          {applicationId && !doc.application_id && <button className="btn sec" disabled={working} onClick={() => void act("link")}>Use in application</button>}
-          <button className="btn sec danger" disabled={working || locked || ["queued","processing"].includes(doc.status)} onClick={() => void act("delete")}><Icon name="trash" />Delete permanently</button>
+          {applicationId && !isIn(doc, applicationId) && <button className="btn sec" disabled={working} onClick={() => void act("link")}>Use in application</button>}
+          <button className="btn sec danger" disabled={working || ["queued","processing"].includes(doc.status)} onClick={() => void act("delete")}><Icon name="trash" />Delete permanently</button>
         </>}
       {locked && <small className="hint">Linked to a submitted application</small>}
     </div>}
     </div>
   );
+}
+
+/** One status chip, shared by the application cards and the vault table. */
+export function DocStatus({ doc }: { doc: DocumentSummary }) {
+  // A file the customer moved from Other to the type HomeFlow saw counts as matched.
+  const outcome = doc.classification?.detected_type === doc.document_tag ? "matched" : doc.classification?.outcome;
+  if (doc.status === "processing" || doc.status === "queued") return <span className="chip n">Reading it now</span>;
+  if (doc.status === "failed") return <span className="chip r"><Icon name="alert" />Could not read</span>;
+  if (outcome === "unreadable" && !doc.extracted_field_count) return <span className="chip w"><Icon name="alert" />Saved · unreadable</span>;
+  if (doc.status === "completed" && doc.missing_field_count > 0) return <span className="chip w"><Icon name="alert" />Fields need review</span>;
+  if (doc.status === "completed" && doc.searchable === false) return <span className="chip w" title="Open it and choose Retry reading"><Icon name="alert" />Not searchable yet</span>;
+  if (doc.classification?.mixed_document) return <span className="chip w"><Icon name="alert" />Several documents</span>;
+  if (doc.document_tag === "other" && outcome === "mismatched") return <span className="chip w"><Icon name="info" />{doc.classification?.selected_type !== "other" ? "Saved as Other" : "Type suggested"}</span>;
+  if (outcome === "matched" && doc.document_tag !== "other") return <span className="chip g"><Icon name="check" />{doc.application_id ? "Document type matched" : "Identified"}</span>;
+  if (doc.document_tag === "other" && doc.status === "completed") return <span className="chip g"><Icon name="check" />Saved · searchable</span>;
+  if (outcome) return <span className="chip w"><Icon name="alert" />Needs a look</span>;
+  return <span className="chip n">Stored</span>;
 }
 
 /** Small drawing of each document type, shown on its tile once a file is in. */

@@ -20,10 +20,11 @@ def _connection() -> pika.BlockingConnection:
 
 def publish_extraction_job(
     *, customer_id: UUID, application_id: UUID | None, file_id: UUID,
-    document_tag: str, trace_id: str,
+    document_tag: str, trace_id: str, mode: str = "read",
 ) -> None:
-    """Durable publish. A failure here leaves the file queued for retry."""
-    body = _message_body(customer_id, application_id, file_id, document_tag, trace_id)
+    """Durable publish. A failure here leaves the file queued for retry.
+    mode "read" reads and identifies the file; "extract" pulls fields from the text kept at that read."""
+    body = _message_body(customer_id, application_id, file_id, document_tag, trace_id, mode)
     conn = _connection()
     try:
         channel = conn.channel()
@@ -34,17 +35,18 @@ def publish_extraction_job(
             body=body,
             properties=pika.BasicProperties(delivery_mode=2, content_type="application/json"),
         )
-        log.info("queued file %s (%s)", file_id, document_tag)
+        log.info("queued file %s (%s, %s)", file_id, document_tag, mode)
     finally:
         conn.close()
 
 
 def _message_body(customer_id: UUID, application_id: UUID | None, file_id: UUID,
-                  document_tag: str, trace_id: str) -> bytes:
+                  document_tag: str, trace_id: str, mode: str = "read") -> bytes:
     return json.dumps({
         "customer_id": str(customer_id),
         "application_id": str(application_id) if application_id else None,
         "file_id": str(file_id),
         "document_tag": document_tag,
         "trace_id": trace_id,
+        "mode": mode,
     }).encode()

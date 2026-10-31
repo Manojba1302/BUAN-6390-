@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.db.models import File, Extraction
 from app.services import document_answers
 import doc_types
+from app.services import attachments
 
 
 def matches(question):
@@ -15,7 +16,7 @@ def answer(db, customer, application_id, question):
         return None
     query = select(File).where(File.customer_id == customer.customer_id)
     if application_id is not None:
-        query = query.where(File.application_id == application_id)
+        query = query.where(attachments.attached_to(application_id))
     files = db.scalars(query.order_by(File.uploaded_at.desc())).all()
     tags = {tag for pattern,tag in document_answers.TAGS if re.search(pattern,question,re.I)}
     files = [f for f in files if not tags or f.document_tag in tags]

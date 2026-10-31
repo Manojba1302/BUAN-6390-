@@ -3,6 +3,7 @@ import re
 from sqlalchemy import select
 from app.db.models import File
 from app.services import document_answers as fields
+from app.services import attachments
 
 SUMMARY_FIELDS = {
     "paystub": ("employer_name", "position", "pay_period_start", "pay_period_end", "pay_rate", "pay_rate_basis", "regular_pay", "overtime_pay", "bonus_pay", "gross_pay", "total_deductions", "federal_withholding", "net_pay", "ytd_gross"),
@@ -26,7 +27,7 @@ def answer(db, customer, application_id, question):
         return None
     query = select(File).where(File.customer_id == customer.customer_id, File.document_tag == tag)
     if application_id is not None:
-        query = query.where(File.application_id == application_id)
+        query = query.where(attachments.attached_to(application_id))
     files = db.scalars(query.order_by(File.uploaded_at.desc())).all()
     named = [file for file in files if file.original_name.lower() in question.lower()]
     files = named or files

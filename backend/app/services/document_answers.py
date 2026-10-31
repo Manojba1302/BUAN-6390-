@@ -5,6 +5,7 @@ from sqlalchemy import select
 import doc_types
 import money_values
 from app.db.models import Extraction, File
+from app.services import attachments
 
 RULES = [
     (r"\b(ssn|social security number|social security no)\b", ("ssn", "employee_ssn")),
@@ -77,7 +78,7 @@ def answer(db, customer, application_id, question):
     fields, tags = route
     query = select(File).where(File.customer_id == customer.customer_id, File.document_tag.in_(tags))
     if application_id is not None:
-        query = query.where(File.application_id == application_id)
+        query = query.where(attachments.attached_to(application_id))
     files = db.scalars(query.order_by(File.uploaded_at.desc())).all()
     named = [file for file in files if file.original_name.lower() in question.lower()]
     files = named or files

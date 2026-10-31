@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 20
     allowed_content_types: str = "application/pdf,image/jpeg,image/png,image/heic,image/webp,image/tiff"
 
+    google_client_id: str = ""
     cookie_secure: bool = False  # Set true when serving through HTTPS.
     frontend_url: str = "http://localhost:5173"
     smtp_host: str = "mailpit"
