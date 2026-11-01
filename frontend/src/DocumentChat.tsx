@@ -6,8 +6,11 @@ import type { ApplicationListItem } from "./types";
 type Reply = ChatReply;
 type Turn = { question: string; reply?: Reply; error?: string; source_status?: Record<string, string>; draft?: string };
 
-export function DocumentChat({ applicationId, minimized, onClose, onUnread, onOpenSource, scope }: {
-  applicationId: string; minimized: boolean; onClose: () => void; onUnread: () => void; onOpenSource: (id: string) => void;
+export function DocumentChat({ applicationId, owner, minimized, onClose, onUnread, onOpenSource, scope }: {
+  /** null: the whole vault. */
+  applicationId: string | null;
+  /** The signed-in customer: the open chat is remembered per person, so a shared browser never reopens someone else's. */
+  owner: string; minimized: boolean; onClose: () => void; onUnread: () => void; onOpenSource: (id: string) => void;
   /** Shown under the header on the vault page, where the customer picks which application to ask about. */
   scope?: ReactNode;
 }) {
@@ -24,7 +27,7 @@ export function DocumentChat({ applicationId, minimized, onClose, onUnread, onOp
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [ended, setEnded] = useState(false);
-  const storageKey = `homeflow-chat-session:${applicationId}`;
+  const storageKey = `homeflow-chat-session:${owner}:${applicationId ?? "vault"}`;
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<{conversation_id: string; created_at: string; updated_at: string; title: string; question_count: number}[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -150,7 +153,8 @@ export function DocumentChat({ applicationId, minimized, onClose, onUnread, onOp
 
 const appRef = (id: string) => `HF-${id.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
 
-/** Chat answers only from one application's attached documents, so on the vault page the customer chooses which. */
+/** On the vault page the customer chooses what the chat answers from: every vault document, or one application's.
+ *  The value "" means the whole vault. */
 export function ChatScope({ applications, value, onChange }: {
   applications: ApplicationListItem[]; value: string; onChange: (id: string) => void;
 }) {
@@ -158,10 +162,11 @@ export function ChatScope({ applications, value, onChange }: {
     <div className="chat-scope">
       <label htmlFor="chat-scope-app">Asking about</label>
       <select id="chat-scope-app" value={value} onChange={event => onChange(event.target.value)}>
+        <option value="">All documents in my vault</option>
         {applications.map(app => <option key={app.application_id} value={app.application_id}>
           Application {appRef(app.application_id)} · {app.status === "draft" ? "in progress" : app.status}</option>)}
       </select>
-      <small>Answers come only from documents attached to this application.</small>
+      <small>{value ? "Answers come only from documents attached to this application." : "Answers come from every document in your vault."}</small>
     </div>
   );
 }

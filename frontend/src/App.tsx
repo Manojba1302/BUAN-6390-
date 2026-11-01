@@ -301,10 +301,11 @@ export function App() {
     return <div className="body"><main className="main"><p className="lede">Opening your vault…</p></main></div>;
   }
   const inApplication = !vaultOpen && !!appId && !!stepSpec;
-  // Chat is customer chat on both pages (Vijay, Oct 2026). It answers from one application's documents:
-  // inside an application that one; on the vault page the one chosen, else the last opened, else the newest.
+  // Chat is customer chat on both pages (Vijay, Oct 2026). Inside an application it answers from that application's
+  // documents. On the vault page from the one chosen, else the last opened, else the newest; with no application,
+  // or when the customer picks "All documents in my vault" (""), from the whole vault (null).
   const known = (id: string | null) => !!id && applications.some(a => a.application_id === id);
-  const chatAppId = inApplication ? appId : known(vaultChatApp) ? vaultChatApp : known(appId) ? appId : applications[0]?.application_id ?? null;
+  const chatAppId: string | null = inApplication ? appId : vaultChatApp === "" ? null : known(vaultChatApp) ? vaultChatApp : known(appId) ? appId : applications[0]?.application_id ?? null;
 
   if (submitted) {
     return (
@@ -432,11 +433,11 @@ export function App() {
         </main>
       </div>
 
-      {chatAppId && !chatOpen && !openDoc && <button className="assistant-launcher" type="button" aria-label={chatUnread ? "New reply from HomeFlow - open chat" : chatStarted ? "Resume HomeFlow conversation" : "Ask HomeFlow about your documents"} onClick={() => {setChatStarted(true);setChatOpen(true);setChatUnread(false);}}><Icon name="chat" /><span className="assistant-launcher-label">{chatUnread ? "New reply" : chatStarted ? "Resume chat" : "Ask HomeFlow"}</span>{chatUnread ? <span className="chat-unread-badge" role="status" aria-label="Unread reply">1</span> : chatStarted && <span className="chat-active-dot" aria-label="Conversation active" />}</button>}
+      {!chatOpen && !openDoc && <button className="assistant-launcher" type="button" aria-label={chatUnread ? "New reply from HomeFlow - open chat" : chatStarted ? "Resume HomeFlow conversation" : "Ask HomeFlow about your documents"} onClick={() => {setChatStarted(true);setChatOpen(true);setChatUnread(false);}}><Icon name="chat" /><span className="assistant-launcher-label">{chatUnread ? "New reply" : chatStarted ? "Resume chat" : "Ask HomeFlow"}</span>{chatUnread ? <span className="chat-unread-badge" role="status" aria-label="Unread reply">1</span> : chatStarted && <span className="chat-active-dot" aria-label="Conversation active" />}</button>}
       {templateOpen && appId && <TemplateDocuments applicationId={appId} onClose={()=>setTemplateOpen(false)}/>}
-      {chatStarted && chatAppId && <DocumentChat key={chatAppId} applicationId={chatAppId} minimized={!chatOpen || !!openDoc}
+      {chatStarted && <DocumentChat key={chatAppId ?? "vault"} applicationId={chatAppId} owner={user.customer_id} minimized={!chatOpen || !!openDoc}
         onUnread={() => setChatUnread(true)} onClose={() => setChatOpen(false)} onOpenSource={setOpenDoc}
-        scope={inApplication ? undefined : <ChatScope applications={applications} value={chatAppId} onChange={setVaultChatApp} />} />}
+        scope={inApplication ? undefined : <ChatScope applications={applications} value={chatAppId ?? ""} onChange={setVaultChatApp} />} />}
       <DocDrawer fileId={openDoc} onClose={() => setOpenDoc(null)}
                  onSaved={refresh} />
     </div>

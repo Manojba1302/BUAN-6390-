@@ -21,7 +21,7 @@ def answer(db, customer, application_id, question):
     tags = {tag for pattern,tag in document_answers.TAGS if re.search(pattern,question,re.I)}
     files = [f for f in files if not tags or f.document_tag in tags]
     if not files:
-        return {"answer":"No matching documents are attached to this application.","citations":[],"evidence":[]}
+        return {"answer":f"No matching documents are {attachments.where(application_id)}.","citations":[],"evidence":[]}
     rows = db.scalars(select(Extraction).where(Extraction.file_id.in_([f.file_id for f in files]))).all()
     lines = [describe(f,rows) for f in files]
     return {"answer":"Missing saved extraction fields are listed below. This does not mean the information is absent from the original document. Saved corrections take precedence.\n\n" + "\n\n".join(lines), "citations":[],"evidence":[],"document_links":[{"file_id":str(f.file_id),"original_name":f.original_name} for f in files]}

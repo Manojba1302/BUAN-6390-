@@ -21,16 +21,17 @@ from app.api.v1 import chat
 router = APIRouter(prefix="/chat/conversations", tags=["chat"])
 
 class NewConversation(BaseModel):
-    application_id: UUID
+    application_id: UUID | None = None      # none: a vault conversation about every document
 
 class Message(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     context_after: datetime | None = None
 
 @router.get("")
-def listing(application_id: UUID, db: Session = Depends(get_db), customer: Customer = Depends(current_customer)):
+def listing(application_id: UUID | None = None, db: Session = Depends(get_db), customer: Customer = Depends(current_customer)):
     chat._check_application(db, customer, application_id)
-    rows = db.scalars(select(ChatConversation).where(ChatConversation.customer_id == customer.customer_id, ChatConversation.application_id == application_id).order_by(ChatConversation.updated_at.desc())).all()
+    scope = ChatConversation.application_id.is_(None) if application_id is None else ChatConversation.application_id == application_id
+    rows = db.scalars(select(ChatConversation).where(ChatConversation.customer_id == customer.customer_id, scope).order_by(ChatConversation.updated_at.desc())).all()
     return [item for row in rows if (item := _summary(db, row))["question_count"]]
 
 def _summary(db, row):

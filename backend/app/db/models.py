@@ -235,7 +235,7 @@ class PasswordReset(Base):
 class ChatConversation(Base):
     __tablename__ = "chat_conversation"
     conversation_id: Mapped[UUID] = _pk()
-    application_id: Mapped[UUID] = mapped_column(ForeignKey("application.application_id", ondelete="CASCADE"))
+    application_id: Mapped[UUID | None] = mapped_column(ForeignKey("application.application_id", ondelete="CASCADE"))   # none: the whole vault
     customer_id: Mapped[UUID] = mapped_column(ForeignKey("customer.customer_id", ondelete="CASCADE"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

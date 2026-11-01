@@ -170,8 +170,9 @@ export const api = {
 
   documentTemplates: () => request<{template_id:string;name:string;version:string}[]>("/template-documents"),
   renderTemplate: (applicationId:string,templateId:string) => request<{markdown:string;missing_fields:string[];version:string;pdf_base64:string;pages:string[]}>("/template-documents/render",{...json({application_id:applicationId,template_id:templateId}),method:"POST"}),
-  conversations: (applicationId: string) => request<{conversation_id: string; created_at: string; updated_at: string; title: string; question_count: number}[]>(`/chat/conversations?application_id=${applicationId}`),
-  newConversation: (applicationId: string) => request<{conversation_id: string}>("/chat/conversations", {...json({application_id:applicationId}), method:"POST"}),
+  /** No application: conversations about the whole vault. */
+  conversations: (applicationId: string | null) => request<{conversation_id: string; created_at: string; updated_at: string; title: string; question_count: number}[]>(`/chat/conversations${applicationId ? `?application_id=${applicationId}` : ""}`),
+  newConversation: (applicationId: string | null) => request<{conversation_id: string}>("/chat/conversations", {...json({application_id:applicationId}), method:"POST"}),
   chatHistory: (id: string) => request<{conversation_id: string; turns: SavedChatTurn[]}>(`/chat/conversations/${id}`),
   resumeChatSession: (id: string, contextAfter: string) => request<void>(`/chat/conversations/${id}/resume`, {...json({context_after:contextAfter}),method:"POST"}),
   endChatSession: (id: string, contextAfter: string) => request<void>(`/chat/conversations/${id}/end`, {...json({context_after:contextAfter}),method:"POST"}),
@@ -179,7 +180,7 @@ export const api = {
   streamMessage: streamChat,
   sendMessage: (id: string, question: string, signal?: AbortSignal, contextAfter?: string) => request<SavedChatTurn>(`/chat/conversations/${id}/messages`, {...json({question, context_after:contextAfter}), method:"POST", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(150000)]) : AbortSignal.timeout(150000)}),
 
-  ask: (question: string, applicationId: string, signal?: AbortSignal) =>
+  ask: (question: string, applicationId: string | null, signal?: AbortSignal) =>
     request<{ answer: string; document_links?: { file_id: string; original_name: string }[]; citations: { file_id: string; page: number }[]; evidence: { file_id: string; original_name: string; page: number }[] }>(
       "/chat", {
         method: "POST",

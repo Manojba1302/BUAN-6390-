@@ -42,6 +42,8 @@ def on_startup() -> None:
     attachments.ensure(engine)               # one document in several applications
     from app.services import versions
     versions.ensure(engine)                  # replace keeps earlier versions
+    from app.services import chat_history
+    chat_history.ensure(engine)              # a vault chat needs no application
     try:
         storage.ensure_bucket()
     except Exception as exc:                 # storage down should not stop the API

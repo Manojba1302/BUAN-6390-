@@ -83,7 +83,7 @@ def answer(db, customer, application_id, question):
     named = [file for file in files if file.original_name.lower() in question.lower()]
     files = named or files
     if not files:
-        return {"answer": "No matching document is attached here. Upload or attach the document first.", "citations": [], "evidence": []}
+        return {"answer": "No matching document is attached here. Upload or attach the document first." if application_id else "No matching document is in your vault yet. Upload it first.", "citations": [], "evidence": []}
     if "employer_address" in fields and not _has_field(db, files, "employer_address"):
         return None   # read before this field existed: let document search look in the page text instead
     reply = _reply(db, files, fields)

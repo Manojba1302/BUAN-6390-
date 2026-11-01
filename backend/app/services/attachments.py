@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, true
 from sqlalchemy.orm import Session
 
 from app.db.models import Application, ApplicationDocument, File
@@ -21,6 +21,17 @@ def attached_to(application_id):
     """A condition on File: the document is attached to this application."""
     return File.file_id.in_(select(ApplicationDocument.file_id)
                             .where(ApplicationDocument.application_id == application_id))
+
+
+def in_scope(application_id):
+    """Chat scope on File: one application's documents, or the whole vault when there is none.
+    Callers still filter by customer."""
+    return true() if application_id is None else attached_to(application_id)
+
+
+def where(application_id) -> str:
+    """How a reply names its scope."""
+    return "attached to this application" if application_id is not None else "in your vault"
 
 
 def is_attached(db: Session, file_id: UUID, application_id: UUID | None) -> bool:

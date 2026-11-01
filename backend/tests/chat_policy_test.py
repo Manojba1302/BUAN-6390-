@@ -36,12 +36,11 @@ class ChatPolicyTests(unittest.TestCase):
 
 
 class ApplicationScopeTests(unittest.TestCase):
-    def test_chat_without_application_cannot_search_vault(self):
+    def test_chat_without_application_searches_the_whole_vault(self):
+        # Changed October 2026: the vault page chat answers from every vault document when no
+        # application is chosen. Retrieval still filters by customer (see tests/vault_chat_test.py).
         from app.agent.answering import _check_application
-        from fastapi import HTTPException
         from unittest.mock import Mock
         db = Mock()
-        with self.assertRaises(HTTPException) as raised:
-            _check_application(db, Mock(), None)
-        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIsNone(_check_application(db, Mock(), None))
         db.get.assert_not_called()

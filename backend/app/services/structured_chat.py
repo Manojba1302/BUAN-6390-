@@ -35,7 +35,7 @@ def answer(db, customer, application_id, question):
         return None
     files = _files(db, customer, application_id, question, kind)
     if not files:
-        return {"answer": "No matching documents are attached to this application.", "citations": [], "evidence": []}
+        return {"answer": f"No matching documents are {attachments.where(application_id)}.", "citations": [], "evidence": []}
     rows = db.scalars(select(Extraction).where(Extraction.file_id.in_([f.file_id for f in files]))).all()
     reply = fields._reply(db, files, FIELDS[kind])
     detail = reply["answer"].removeprefix("Matching documents are listed separately; they may belong to different people.\n\n")

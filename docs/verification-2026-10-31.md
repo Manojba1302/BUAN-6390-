@@ -34,3 +34,10 @@ Google setup: see [google-sign-in.md](google-sign-in.md). Set GOOGLE_CLIENT_ID i
 - Vault search UI filters metadata; full-text evidence retrieval currently runs in application-scoped chat.
 - Production Google origin/publishing, HTTPS/cookie configuration and additional device/browser tests remain deployment checks.
 - No processor-side implementation or production-readiness guarantee is implied by this test round.
+
+## Follow-up verification: Vault chat and sign-in layout
+- Reviewed the pending Vault-wide chat scope, nullable conversation application, customer filters, separate history scopes, and revised Google button layout. Vault-wide chat expands the earlier application-only scope; this is a product-scope change for review.
+- Full repeat run: 307 backend tests passed with PostgreSQL/storage integration enabled; 117 worker tests passed; frontend TypeScript/Vite build passed.
+- Six new Vault-chat tests cover document inventory without an application, customer isolation, conversation creation, separate scope records, and rejection of an unowned application. These do not constitute broad live LLM accuracy testing.
+- Fresh visual browser verification was unavailable because browser control returned an access error. The prior real Google sign-in and refresh checks remain recorded above; the revised layout has build validation only in this round.
+- OpenRouter availability/rate limits, broad live-model accuracy, production Google setup and additional-device checks remain outstanding.

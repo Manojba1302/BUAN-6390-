@@ -973,4 +973,16 @@ html body .app .main .decl .q { font-weight: 600 !important; color: var(--hf-ink
 html body .dr-fields .hint, html body .fieldrow .cap { font-weight: 500 !important; color: var(--hf-text) !important; }
 html body .document-chat .chat-welcome > p, html body .document-chat .chat-prompts small { color: var(--hf-text) !important; font-weight: 500 !important; }
 
-.google-sign-in:empty{display:none}.google-sign-in{margin:16px 0;color:#22403a}.google-sign-in p{font-size:14px}.google-sign-in input{display:block;width:100%;padding:12px;border:1px solid #879b96;border-radius:10px;background:white;color:#0f1e1c}
+/* Google sign-in: Google's own button at the top of the card, then "or with email". */
+html body .google-sign-in { display: grid; gap: 14px; margin-bottom: 8px; }
+html body .google-sign-in.pending { display: none; }
+html body .google-button { display: flex; justify-content: center; min-height: 44px; }
+html body .google-status { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--hf-muted); font-size: 14px; margin: 0; }
+html body .google-error { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 8px; background: var(--hf-ground); border: 1px solid var(--hf-line); border-radius: 14px; padding: 10px 12px; font-size: 14px; color: var(--hf-ink); }
+html body .google-error svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--bad, #b42318); }
+html body .google-error span { flex: 1 1 200px; }
+html body .google-error .linkish { color: var(--hf-brand) !important; font-weight: 600; }
+html body .google-link { display: grid; gap: 6px; }
+html body .google-link small { color: var(--hf-muted); font-weight: 400; font-size: 13px; }
+html body .auth-or { display: flex; align-items: center; gap: 12px; margin: 2px 0 0; color: var(--hf-muted); font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+html body .auth-or::before, html body .auth-or::after { content: ""; flex: 1; height: 1px; background: var(--hf-line); }

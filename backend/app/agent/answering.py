@@ -119,7 +119,7 @@ def _search_answer(body, db, customer):
         return {"answer": "I could not find anything in your documents that answers that.",
                 "citations": [], "evidence": []}
     focused = chat_privacy.scoped(db, customer, body.application_id, _focus_passages(db, passages, body.question))
-    return _answer(question, focused) if focused else {"answer": "I could not find that document in this application.", "citations": [], "evidence": []}
+    return _answer(question, focused) if focused else {"answer": "I could not find that document " + ("in this application." if body.application_id else "in your vault."), "citations": [], "evidence": []}
 
 
 
@@ -160,9 +160,9 @@ def _inventory(db, customer, application_id, question=""):
             query = query.where(File.document_tag == tag)
     files = db.scalars(query.order_by(File.uploaded_at.desc())).all()
     if not files:
-        return {"answer": "You have no documents attached to this application yet.", "citations": [], "evidence": []}
+        return {"answer": f"You have no documents {attachments.where(application_id)} yet.", "citations": [], "evidence": []}
     lines = [f"• {file.original_name} — {file.document_tag.replace('_', ' ')} ({file.status})" for file in files]
-    return {"answer": f"You have {len(files)} matching document(s) {'attached to this application' if application_id else 'in your account'}:\n" + "\n".join(lines),
+    return {"answer": f"You have {len(files)} matching document(s) {attachments.where(application_id)}:\n" + "\n".join(lines),
             "citations": [], "document_links": [{"file_id": str(file.file_id), "original_name": file.original_name} for file in files],
             "evidence": [{"file_id": str(file.file_id), "page": 1, "original_name": file.original_name,
                           "content": "Document inventory from your account"} for file in files]}
@@ -170,7 +170,7 @@ def _inventory(db, customer, application_id, question=""):
 
 def _check_application(db, customer, application_id):
     if application_id is None:
-        raise HTTPException(400, "Select an application to ask about its attached documents.")
+        return                      # no application: the chat answers from the whole vault
     application = db.get(Application, application_id)
     if application is None or application.customer_id != customer.customer_id:
         raise HTTPException(404, "Application not found")

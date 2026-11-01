@@ -67,7 +67,7 @@ def _pending(ctx):
 
 
 def _files(ctx, ids):
-    return ctx.db.scalars(select(File).where(File.file_id.in_([UUID(value) for value in ids]),File.customer_id==ctx.customer.customer_id,attachments.attached_to(ctx.conversation.application_id))).all() if ids else []
+    return ctx.db.scalars(select(File).where(File.file_id.in_([UUID(value) for value in ids]),File.customer_id==ctx.customer.customer_id,attachments.in_scope(ctx.conversation.application_id))).all() if ids else []
 
 
 def _answer(state: State, runtime: Runtime[Context]):
