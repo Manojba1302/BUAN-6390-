@@ -26,6 +26,9 @@ from worker.config import config
 log = logging.getLogger(__name__)
 
 MIN_OCR_CHARS = 80
+# Pages identified and read per file. Enough to notice several documents in one file without
+# sending a 100-page deed through the model page by page (up to 2 minutes a page).
+MAX_PAGES = 20
 
 
 # ---------------------------------------------------------------- reading
@@ -78,7 +81,7 @@ def classify(document: dict, selected_type: str) -> dict:
     Pages that disagree mean the file holds more than one document, which we
     flag rather than tagging twelve pages as one W-2.
     """
-    per_page, evidence, readable = _classify_pages(document["pages"][:6])     # six is plenty
+    per_page, evidence, readable = _classify_pages(document["pages"][:MAX_PAGES])
     if not per_page:
         return _result(selected_type, doc_types.UNKNOWN, False, [], False)
 
@@ -86,7 +89,7 @@ def classify(document: dict, selected_type: str) -> dict:
     mixed = len(distinct) > 1
     detected = per_page[0] if not mixed else doc_types.UNKNOWN
     result = _result(selected_type, detected, readable, evidence, mixed)
-    if all(p.get("method") == "native_text" and doc_types.regex_vote(p.get("text", "")) for p in document["pages"][:6]):
+    if all(p.get("method") == "native_text" and doc_types.regex_vote(p.get("text", "")) for p in document["pages"][:MAX_PAGES]):
         result["model"] = "native_text_rules"
     return result
 
@@ -151,12 +154,12 @@ def extract(document: dict, document_tag: str) -> dict[str, dict]:
 
     prompt = _compact_prompt(spec)
     out: dict[str, dict] = {}
-    for index, page in enumerate(document["pages"][:6], start=1):
+    for index, page in enumerate(document["pages"][:MAX_PAGES], start=1):
         if _read_page(out, prompt, page, index, spec):
             out = _recover_evidence(document_tag, document["pages"][:index], out)
             if _enough_fields(spec, out):
                 break
-    return _recover_evidence(document_tag, document["pages"][:6], out)
+    return _recover_evidence(document_tag, document["pages"][:MAX_PAGES], out)
 
 
 OCR_FIRST_CHARS = 200   # enough OCR text to try a text-only read before sending the image

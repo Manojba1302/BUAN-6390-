@@ -42,6 +42,16 @@ def set_status(conn, file_id: str, status: str, *, error: str | None = None,
     """), {"id": file_id, "status": status, "error": error, "pages": pages})
 
 
+def set_tag(conn, file_id: str, document_tag: str) -> None:
+    conn.execute(text("UPDATE file SET document_tag = :tag WHERE file_id = CAST(:id AS uuid)"),
+                 {"id": file_id, "tag": document_tag})
+
+
+def set_path(conn, file_id: str, logical_path: str) -> None:
+    conn.execute(text("UPDATE file SET logical_path = :path WHERE file_id = CAST(:id AS uuid)"),
+                 {"id": file_id, "path": logical_path})
+
+
 def bump_attempts(conn, file_id: str) -> int:
     return conn.execute(text("""
         UPDATE file SET attempts = attempts + 1

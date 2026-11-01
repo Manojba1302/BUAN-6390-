@@ -4,6 +4,7 @@ from collections import Counter
 from sqlalchemy import select
 from app.api.v1 import applications
 from app.db.models import File
+from app.services import attachments
 
 PROGRESS = re.compile(r"\b(?:application|loan) (?:status|progress)\b|where (?:is|s) my (?:loan|application)|(?:what(?:s| is)|which) (?:the |my )?next step|how (?:far|much).*application|application.*(?:complete|left|remaining)", re.I)
 DOCUMENTS = re.compile(r"(?:what|which).*documents?.*(?:need|missing|outstanding|left|remaining)|documents?.*(?:still need|outstanding|missing)|(?:missing|outstanding|required) documents?", re.I)
@@ -46,8 +47,8 @@ def progress_lines(state):
 def document_lines(db, app):
     missing = applications._missing_documents(db, app)
     lines = ["Your application checklist still needs:"] if missing else ["All required upload counts are met in your application checklist."]
-    lines.extend(f"- {item['display_name']}: {item['need'] - item['have']} more needed ({item['have']} of {item['need']} attached)." for item in missing)
-    files = db.scalars(select(File).where(File.application_id == app.application_id, File.customer_id == app.customer_id)).all()
+    lines.extend(f"- {item['display_name']}: {item['need'] - item['have']} more needed ({item['have']} of {item['need']} read{_pending(item)})." for item in missing)
+    files = db.scalars(select(File).where(attachments.attached_to(app.application_id), File.customer_id == app.customer_id)).all()
     counts = Counter(file.status for file in files)
     if counts["failed"]:
         lines.append(f"{counts['failed']} attached file(s) failed processing. Open Documents and retry reading them.")
@@ -56,3 +57,10 @@ def document_lines(db, app):
         lines.append(f"{pending} attached file(s) are still awaiting or undergoing processing.")
     lines.append("Open Documents to upload or review files. Meeting upload counts does not mean the lender has accepted them; additional lender conditions are not connected yet.")
     return lines
+
+
+def _pending(item: dict) -> str:
+    """Uploaded files that do not count yet, so the customer knows why."""
+    notes = [f"{item[key]} {label}" for key, label in (("reading", "still being read"), ("unread", "could not be read"))
+             if item.get(key)]
+    return f"; {', '.join(notes)}" if notes else ""

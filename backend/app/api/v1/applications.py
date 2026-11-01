@@ -5,19 +5,20 @@ import math
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from app.api.v1.fields import _dictionary
 from app.db.models import (
     Application, ApplicationField, Asset, ChecklistRequirement, Customer,
-    Declaration, Employment, File, Liability,
+    Declaration, Employment, Extraction, File, Liability,
 )
 from app.core.security import current_customer
 from app.db.session import get_db
 from app.services import audit, income_validation, employment_suggestions, address_suggestions, name_suggestions, prefill as prefill_service
+from app.services import attachments
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -59,8 +60,30 @@ def list_applications(db: Session = Depends(get_db),
     rows = db.scalars(select(Application)
                       .where(Application.customer_id == customer.customer_id)
                       .order_by(Application.created_at.desc())).all()
-    return [{"application_id": str(a.application_id), "status": a.status,
+    return [{"application_id": str(a.application_id), "status": a.status, "purpose": _purpose(db, a),
              "current_step": a.current_step, "created_at": a.created_at.isoformat()} for a in rows]
+
+
+def _purpose(db: Session, app: Application) -> str | None:
+    """What the loan is for ("Purchase", a refinance), as chosen in Get started."""
+    field = db.get(ApplicationField, (app.application_id, "loanPurpose"))
+    return field.value if field and field.value else None
+
+
+@router.get("/{application_id}/checklist")
+def checklist(application_id: UUID, db: Session = Depends(get_db),
+              customer: Customer = Depends(current_customer)) -> list[dict]:
+    """The loan card on the vault page: each document this loan needs, how many are in, and which files."""
+    app = _owned(db, application_id, customer)
+    return [_checklist_row(db, app, req) for req in _requirements(db, app)]
+
+
+def _checklist_row(db: Session, app: Application, req: ChecklistRequirement) -> dict:
+    files = db.scalars(select(File).where(attachments.attached_to(app.application_id),
+                                          File.document_tag == req.document_tag).order_by(File.uploaded_at)).all()
+    return {"document_tag": req.document_tag, "display_name": req.display_name, "need": req.required_count,
+            **document_counts(db, app.application_id, req.document_tag),
+            "files": [{"file_id": str(f.file_id), "original_name": f.original_name, "status": f.status} for f in files]}
 
 
 @router.get("/{application_id}")
@@ -297,23 +320,39 @@ def _percent(steps: list[dict]) -> int:
 
 
 def _missing_documents(db: Session, app: Application) -> list[dict]:
-    """A confirmed mismatch still counts. The classifier warns, it never blocks."""
-    requirements = db.scalars(select(ChecklistRequirement)
-                              .order_by(ChecklistRequirement.sort_order)).all()
+    """A requirement is met by documents that were read, not merely uploaded. A mismatch is saved as
+    Other and never counts for the type that was chosen."""
+    out = []
+    for req in _requirements(db, app):
+        counts = document_counts(db, app.application_id, req.document_tag)
+        if counts["have"] < req.required_count:
+            out.append({"document_tag": req.document_tag, "display_name": req.display_name,
+                        "need": req.required_count, **counts})
+    return out
+
+
+def _requirements(db: Session, app: Application) -> list[ChecklistRequirement]:
+    """The documents this loan needs. W-2s and pay stubs only apply to someone employed."""
+    requirements = db.scalars(select(ChecklistRequirement).order_by(ChecklistRequirement.sort_order)).all()
     income_status = db.get(ApplicationField, (app.application_id, "employmentStatus"))
     non_employee = income_status and income_status.value in {"Self-employed", "Retired", "Not currently employed", "Other"}
-    out = []
-    for req in requirements:
-        if non_employee and req.document_tag in {"w2", "paystub"}:
-            continue
-        have = db.scalars(select(File).where(
-            File.application_id == app.application_id,
-            File.document_tag == req.document_tag)).all()
-        if len(have) < req.required_count:
-            out.append({"document_tag": req.document_tag,
-                        "display_name": req.display_name,
-                        "have": len(have), "need": req.required_count})
-    return out
+    return [r for r in requirements if not (non_employee and r.document_tag in {"w2", "paystub"})]
+
+
+def document_counts(db: Session, application_id, document_tag: str) -> dict:
+    """have: read, with fields pulled out. reading: still being read. unread: failed, or nothing could be read."""
+    files = db.scalars(select(File).where(attachments.attached_to(application_id),
+                                          File.document_tag == document_tag)).all()
+    reading = sum(f.status in ("uploaded", "queued", "processing") for f in files)
+    have = sum(f.status == "completed" and _was_read(db, f.file_id) for f in files)
+    return {"have": have, "reading": reading, "unread": len(files) - have - reading}
+
+
+def _was_read(db: Session, file_id) -> bool:
+    return db.scalar(select(Extraction.extraction_id).where(
+        Extraction.file_id == file_id,
+        (Extraction.value_raw.is_not(None)) | (Extraction.value_normalized.is_not(None))
+        | (Extraction.corrected_value.is_not(None))).limit(1)) is not None
 
 
 @router.get("/{application_id}/prefill")
@@ -350,4 +389,31 @@ def submit(application_id: UUID, db: Session = Depends(get_db),
                  customer_id=customer.customer_id, application_id=app.application_id)
     db.commit()
     return {"application_id": str(app.application_id), "status": app.status,
-            "reference": f"APP-{str(app.application_id)[:6].upper()}"}
+            "reference": f"HF-{app.application_id.hex[:8].upper()}"}   # the same reference the customer sees everywhere else
+
+
+@router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_draft(application_id: UUID, db: Session = Depends(get_db),
+                 customer: Customer = Depends(current_customer)) -> Response:
+    """A draft no lender has seen can be deleted outright: its answers, progress and chat go with it.
+    Its documents belong to the customer and stay in the vault, still in any other application."""
+    app = _owned(db, application_id, customer)
+    if app.status != "draft":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only a draft can be deleted. This application was already sent.")
+    _release_files(db, app.application_id)
+    db.execute(delete(Application).where(Application.application_id == app.application_id))
+    audit.record(db, action="application.deleted", customer_id=customer.customer_id,
+                 payload={"application_id": str(application_id)})
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _release_files(db: Session, application_id: UUID) -> None:
+    """A file pointing at this application points at another one it is in instead, or at none."""
+    db.execute(text("SET LOCAL homeflow.keep_links = 'on'"))
+    db.execute(text("""
+        UPDATE file f SET application_id = (
+            SELECT ad.application_id FROM application_document ad
+             WHERE ad.file_id = f.file_id AND ad.application_id <> :app
+             ORDER BY ad.attached_at DESC LIMIT 1)
+         WHERE f.application_id = :app"""), {"app": application_id})

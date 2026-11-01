@@ -7,6 +7,7 @@ import re
 from sqlalchemy import select
 from fastapi import HTTPException
 from app.db.models import Application, ApplicationField, Asset, Declaration, Employment, File, Liability
+from app.services import attachments
 
 ROOT = Path(__file__).resolve().parents[1]/"templates"
 DICTIONARY = Path(__file__).resolve().parents[1]/"data"/"field_dictionary.json"
@@ -97,7 +98,7 @@ def _money(amount):
 def block_values(db,application):
     key = application.application_id
     rows = lambda model: db.scalars(select(model).where(model.application_id==key)).all()
-    files = db.scalars(select(File).where(File.application_id==key).order_by(File.uploaded_at)).all()
+    files = db.scalars(select(File).where(attachments.attached_to(key)).order_by(File.uploaded_at)).all()
     return {"employment_list":"\n".join(_job_line(job) for job in rows(Employment)),
             "asset_list":"\n".join(_asset_line(asset) for asset in rows(Asset)),
             "liability_list":"\n".join(f"- {d.liability_type or 'Debt'} with {d.creditor or 'unnamed creditor'}: balance {_money(d.balance)}, "

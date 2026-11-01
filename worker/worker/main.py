@@ -14,6 +14,8 @@ import boto3
 import pika
 from botocore.client import Config as BotoConfig
 
+import pages
+
 from worker import db, pipeline
 from worker.config import config
 
@@ -31,18 +33,116 @@ def _s3():
 
 
 def handle(job: dict) -> None:
-    """Process one file: read, classify, extract, write markdown, embed, save."""
+    """Every file is read, identified and made searchable. Fields are pulled out only
+    once the file is attached to an application, from the text kept at the first read."""
     file_id = job["file_id"]
     record = _claim(file_id)
     if record is None:
         return
+    if job.get("mode") == "extract":
+        document, outcome, chunks = _stored_document(file_id, record), "attached", None
+    else:
+        document, outcome, chunks = _read_and_index(file_id, record, auto=job.get("mode") == "auto")
+    fields = _extract_if_attached(file_id, document, outcome)
+    _finish(file_id, record, len(document["pages"]), outcome, len(fields), chunks)
+    log.info("file %s: done (%s, %s fields)", file_id, outcome, len(fields))
+
+
+def _read_and_index(file_id: str, record: dict, auto: bool = False) -> tuple[dict, str, int]:
+    """Read, identify, index for search, and keep the page text for a later extraction."""
     document = _read_document(file_id, record)
     classification = _classify(file_id, document, record)
-    fields = _extract_fields(file_id, document, record, classification)
-    md_path, markdown = _write_markdown(file_id, document, record, fields)
+    record = _adopt_type(file_id, record, classification) if auto else _settle_type(file_id, record, classification)
+    md_path, markdown = _write_markdown(file_id, document, record, {})
     chunks = pipeline.embed_chunks(pipeline.chunk(document))
-    _save_results(file_id, record, document, classification, fields, md_path, markdown, chunks)
-    log.info("file %s: done, %s chunks embedded", file_id, len(chunks))
+    _keep_pages(file_id, document)
+    with db.session() as conn:
+        db.clear_extractions(conn, file_id)
+        db.save_markdown(conn, file_id, str(md_path), len(markdown))
+        db.replace_chunks(conn, file_id, str(record["customer_id"]), chunks)
+    _check_index(file_id, document, chunks)
+    return document, classification["outcome"], len(chunks)
+
+
+def _settle_type(file_id: str, record: dict, classification: dict) -> dict:
+    """A mismatch never blocks the upload, in the vault or in an application: the file is kept as
+    Other and the type we saw stays on the classification as a suggestion the customer can accept.
+    So a W-2 is never read as a pay stub, nor counted as one."""
+    if classification["outcome"] != "mismatched" or record["document_tag"] == "other":
+        return record
+    with db.session() as conn:
+        db.set_tag(conn, file_id, "other")
+    log.info("file %s: saved as other (chosen %s)", file_id, record["document_tag"])
+    return record | {"document_tag": "other"}
+
+
+# Where a loan document goes when the customer added it without choosing a type or folder.
+TAG_FOLDER = {"drivers_license": "Identification & Licenses", "ssn_card": "Identification & Licenses",
+              "paystub": "Finances", "bank_statement": "Finances", "w2": "Taxes"}
+
+
+def _adopt_type(file_id: str, record: dict, classification: dict) -> dict:
+    """Added without a type: a loan document we recognise takes its own type and folder.
+    Anything we cannot name, or a file holding several documents, stays Other."""
+    found = classification["detected"]
+    if record["document_tag"] != "other" or found not in TAG_FOLDER or classification.get("mixed"):
+        return record
+    with db.session() as conn:
+        db.set_tag(conn, file_id, found)
+        db.set_path(conn, file_id, "/" + TAG_FOLDER[found])
+    log.info("file %s: recognised as %s", file_id, found)
+    return record | {"document_tag": found}
+
+
+def _extract_if_attached(file_id: str, document: dict, outcome: str) -> dict:
+    """Checked again here, after the slow read, so a file attached meanwhile is not missed."""
+    with db.session() as conn:
+        record = db.fetch_file(conn, file_id)
+    if not record or not record["application_id"] or record["document_tag"] == "other" \
+            or outcome not in ("matched", "mismatched", "attached"):
+        return {}                     # Other has no fields; its type can be changed and read later
+    fields = _extract_fields(file_id, document, record)
+    md_path, markdown = _write_markdown(file_id, document, record, fields)
+    with db.session() as conn:
+        db.clear_extractions(conn, file_id)
+        for name, payload in fields.items():
+            db.save_extraction(conn, file_id, name, payload, _model_for(payload))
+        db.save_markdown(conn, file_id, str(md_path), len(markdown))
+        db.audit(conn, "document.fields_extracted", customer_id=str(record["customer_id"]),
+                 file_id=file_id, payload={"document_tag": record["document_tag"], "fields": len(fields)})
+    return fields
+
+
+def _finish(file_id: str, record: dict, pages: int, outcome: str, fields: int, chunks: int | None) -> None:
+    with db.session() as conn:
+        db.set_status(conn, file_id, "completed", pages=pages)
+        db.audit(conn, "document.processed", customer_id=str(record["customer_id"]),
+                 application_id=str(record["application_id"]) if record["application_id"] else None,
+                 file_id=file_id, payload={"fields": fields, "chunks": chunks, "outcome": outcome})
+
+
+def _pages_path(file_id: str):
+    return config.markdown_dir / f"{file_id}.pages.json"
+
+
+def _keep_pages(file_id: str, document: dict) -> None:
+    """The slow part of a read is OCR; keeping its text means attaching never OCRs again."""
+    kept = [{key: page.get(key) for key in ("text", "model_text", "method", "ocr_confidence")}
+            for page in document["pages"]]
+    config.markdown_dir.mkdir(parents=True, exist_ok=True)
+    _pages_path(file_id).write_text(json.dumps(kept), encoding="utf-8")
+
+
+def _stored_document(file_id: str, record: dict) -> dict:
+    """Page images are rendered again (cheap); the text comes from the first read."""
+    path = _pages_path(file_id)
+    if not path.exists():
+        return _read_document(file_id, record)
+    body = _s3().get_object(Bucket=config.s3_bucket, Key=record["storage_key"])["Body"].read()
+    document = pages.read_document(body, record["content_type"], record["original_name"])
+    for page, kept in zip(document["pages"], json.loads(path.read_text(encoding="utf-8"))):
+        page.update({key: value for key, value in kept.items() if value is not None})
+    return document
 
 
 def _claim(file_id: str) -> dict | None:
@@ -80,10 +180,8 @@ def _classify(file_id: str, document: dict, record: dict) -> dict:
     return classification
 
 
-def _extract_fields(file_id: str, document: dict, record: dict, classification: dict) -> dict:
-    """Only a recognised document is extracted. The customer's tag picks the schema; they confirmed it."""
-    if classification["outcome"] not in ("matched", "mismatched"):
-        return {}
+def _extract_fields(file_id: str, document: dict, record: dict) -> dict:
+    """The customer's type picks the schema. Only the five loan documents have one."""
     fields = pipeline.extract(document, record["document_tag"])
     _validate_extraction(record["document_tag"], fields)
     log.info("file %s: %s fields extracted", file_id, len(fields))
@@ -101,22 +199,6 @@ def _write_markdown(file_id: str, document: dict, record: dict, fields: dict):
 
 def _model_for(payload: dict) -> str:
     return config.vision_model if payload["method"] == "vision" else config.extractor_model
-
-
-def _save_results(file_id, record, document, classification, fields, md_path, markdown, chunks) -> None:
-    """Everything the job produced, saved in one transaction."""
-    with db.session() as conn:
-        db.clear_extractions(conn, file_id)
-        for name, payload in fields.items():
-            db.save_extraction(conn, file_id, name, payload, _model_for(payload))
-        db.save_markdown(conn, file_id, str(md_path), len(markdown))
-        db.replace_chunks(conn, file_id, str(record["customer_id"]), chunks)
-        db.set_status(conn, file_id, "completed", pages=len(document["pages"]))
-        db.audit(conn, "document.processed", customer_id=str(record["customer_id"]),
-                 application_id=str(record["application_id"]) if record["application_id"] else None,
-                 file_id=file_id,
-                 payload={"fields": len(fields), "chunks": len(chunks),
-                          "outcome": classification["outcome"]})
 
 
 def on_message(channel, method, _properties, body) -> None:
@@ -174,6 +256,19 @@ def _validate_extraction(tag, fields):
     missing = [key for key in required if not str((fields.get(key) or {}).get("value") or "").strip()]
     if missing:
         raise RuntimeError("Incomplete W-2 extraction; could not read: " + ", ".join(missing) + ". Retry reading or upload a clearer document.")
+
+
+
+
+def _check_index(file_id: str, document: dict, chunks: list[dict]) -> None:
+    """Only a file with nothing to read at all fails. A photo with little printed text is still
+    read from its image, and a file whose search index fell short stays usable: the API shows it
+    as not searchable yet and offers Retry reading."""
+    if not chunks and not any(page.get("image") for page in document["pages"]):
+        raise RuntimeError("File saved, but no readable text was found. Retry with a clearer document.")
+    missing = sum(1 for chunk in chunks if not chunk.get("embedding"))
+    if missing:
+        log.warning("file %s: %s of %s chunks not indexed for search", file_id, missing, len(chunks))
 
 
 if __name__ == "__main__":

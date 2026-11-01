@@ -5,6 +5,7 @@ import pay_evidence
 from sqlalchemy import select
 from app.db.models import Extraction, File, DocumentMarkdown
 from app.services import prefill
+from app.services import attachments
 
 
 def employer_key(value):
@@ -13,7 +14,7 @@ def employer_key(value):
 
 def suggestions(db, application):
     files = db.scalars(select(File).where(
-        File.application_id == application.application_id,
+        attachments.attached_to(application.application_id),
         File.customer_id == application.customer_id, File.status == "completed",
         File.document_tag.in_(["paystub", "w2"])).order_by(File.uploaded_at)).all()
     return [candidate for file in files if (candidate := _candidate(db, file))]

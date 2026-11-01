@@ -6,10 +6,10 @@ DOMAIN = r"printed|conditions|earnings|document|file|upload|application|mortgage
 UNRELATED = r"tell (?:me )?a joke|write (?:me )?(?:a )?(?:poem|python|javascript|code)|weather|sports score|president of|capital of|ignore (?:all |previous )?instructions|system prompt"
 
 
-def allowed(question):
+def allowed(question, document_context=False):
     if re.search(UNRELATED, question, re.I):
         return False
-    if re.search(DOMAIN, question, re.I) or re.search(r"\b(it|its|that|this|these|those)\b|\.(pdf|png|jpe?g)\b",question,re.I):
+    if document_context or re.search(DOMAIN, question, re.I) or re.search(r"\b(it|its|that|this|these|those)\b|\.(pdf|png|jpe?g)\b",question,re.I):
         return True
     keys = [key.replace("_"," ") for spec in doc_types.catalogue()["types"] for key in spec["extract"]]
     return any(re.search(r"\b"+re.escape(key)+r"\b",question,re.I) for key in keys)

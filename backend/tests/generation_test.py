@@ -83,3 +83,14 @@ class GenerationTests(unittest.TestCase):
         result = subprocess.run([sys.executable,"-c","import embedding_config"],env=env,capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0)
         self.assertIn("migrate and rebuild",result.stderr)
+
+
+class CompletionMetadataTests(unittest.TestCase):
+    def test_metadata_does_not_log_provider_text(self):
+        item = {"choices": [{"finish_reason": "private-provider-text"}], "usage": {"prompt_tokens": 12, "completion_tokens": "secret", "total_tokens": 20}, "error": {"message": "secret"}}
+        with self.assertLogs(generation.log, level="INFO") as logs:
+            generation._completion_metadata(item)
+        self.assertIn("reason=unknown", str(logs.output))
+        self.assertIn("prompt=12 completion=None total=20", str(logs.output))
+        self.assertNotIn("secret", str(logs.output))
+        self.assertNotIn("private-provider-text", str(logs.output))

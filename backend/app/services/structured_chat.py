@@ -3,6 +3,7 @@ import re
 from sqlalchemy import select
 from app.db.models import File, Extraction
 from app.services import document_answers as fields
+from app.services import attachments
 
 FIELDS = {
     "name": ("full_name", "employee_name", "account_holder"),
@@ -34,7 +35,7 @@ def answer(db, customer, application_id, question):
         return None
     files = _files(db, customer, application_id, question, kind)
     if not files:
-        return {"answer": "No matching documents are attached to this application.", "citations": [], "evidence": []}
+        return {"answer": f"No matching documents are {attachments.where(application_id)}.", "citations": [], "evidence": []}
     rows = db.scalars(select(Extraction).where(Extraction.file_id.in_([f.file_id for f in files]))).all()
     reply = fields._reply(db, files, FIELDS[kind])
     detail = reply["answer"].removeprefix("Matching documents are listed separately; they may belong to different people.\n\n")
@@ -45,7 +46,7 @@ def answer(db, customer, application_id, question):
 def _files(db, customer, application_id, question, kind):
     query = select(File).where(File.customer_id == customer.customer_id)
     if application_id is not None:
-        query = query.where(File.application_id == application_id)
+        query = query.where(attachments.attached_to(application_id))
     tags = {tag for pattern, tag in fields.TAGS if re.search(pattern, question.lower())}
     tags = tags or ({"paystub"} if kind == "pay" else {"w2", "paystub"} if kind == "employer" else {"w2", "paystub", "bank_statement", "drivers_license"})
     files = db.scalars(query.where(File.document_tag.in_(tags)).order_by(File.uploaded_at.desc())).all()

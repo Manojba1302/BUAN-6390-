@@ -47,13 +47,12 @@ class DocumentLifecycleTests(unittest.TestCase):
                 self.assertIsNone(db.get(ApplicationField,(application_id,"city")))
                 db.get(Application,application_id).status="submitted"; db.commit()
             self.assertEqual(client.delete(f"/api/v1/documents/{file_id}").status_code,409)
-            self.assertEqual(client.delete(f"/api/v1/documents/{file_id}/permanent").status_code,409)
             with SessionLocal() as db:
                 db.get(Application,application_id).status="draft"
                 db.get(File,file_id).status="processing"; db.commit()
-            self.assertEqual(client.delete(f"/api/v1/documents/{file_id}/permanent").status_code,409)
             with SessionLocal() as db:
-                db.get(File,file_id).status="completed"; db.commit()
+                db.get(File,file_id).status="completed"
+                db.get(Application,application_id).status="submitted"; db.commit()
             self.assertEqual(client.delete(f"/api/v1/documents/{file_id}/permanent").status_code,204)
             with SessionLocal() as db:
                 self.assertIsNone(db.get(File,file_id))

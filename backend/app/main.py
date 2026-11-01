@@ -6,7 +6,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import applications, auth, chat, conversations, template_documents, documents, fields, health
+from app.api.v1 import applications, auth, google_auth, chat, conversations, template_documents, documents, fields, health
 from app.core.config import settings
 from app.services import storage
 
@@ -26,18 +26,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for router in (auth.router, health.router, fields.router, applications.router,
+for router in (auth.router, google_auth.router, health.router, fields.router, applications.router,
                documents.router, chat.router, conversations.router, template_documents.router):
     app.include_router(router, prefix=settings.api_prefix)
 
 
 @app.on_event("startup")
 def on_startup() -> None:
-    from app.db.models import AuthAccount, AuthSession, PasswordReset
+    from app.db.models import AuthAccount, AuthSession, PasswordReset, GoogleIdentity, GoogleChallenge
     from app.db.session import engine
-    for table in (AuthAccount.__table__, AuthSession.__table__, PasswordReset.__table__):
+    for table in (AuthAccount.__table__, AuthSession.__table__, PasswordReset.__table__, GoogleIdentity.__table__, GoogleChallenge.__table__):
         table.create(engine, checkfirst=True)
     _fix_checklist_spelling(engine)
+    from app.services import attachments
+    attachments.ensure(engine)               # one document in several applications
+    from app.services import versions
+    versions.ensure(engine)                  # replace keeps earlier versions
+    from app.services import chat_history
+    chat_history.ensure(engine)              # a vault chat needs no application
     try:
         storage.ensure_bucket()
     except Exception as exc:                 # storage down should not stop the API

@@ -2,11 +2,12 @@
 import doc_types
 from sqlalchemy import select
 from app.db.models import Extraction, File
+from app.services import attachments
 
 
 def suggestions(db, application):
     files = db.scalars(select(File).where(
-        File.application_id == application.application_id,
+        attachments.attached_to(application.application_id),
         File.customer_id == application.customer_id,
         File.status == "completed").order_by(File.uploaded_at, File.file_id)).all()
     return [candidate for file in files if (candidate := _candidate(db, file))]

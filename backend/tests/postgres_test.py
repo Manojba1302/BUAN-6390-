@@ -5,6 +5,7 @@ Each test creates its own synthetic customer and removes it afterwards.
     HOMEFLOW_DB_TEST=1 python -m unittest tests.postgres_test        (from backend/)
 Object storage, the queue and Ollama are replaced with fakes.
 """
+from app.agent import generation
 import os
 import json
 import tempfile
@@ -181,18 +182,18 @@ class DatabaseTests(unittest.TestCase):
         self._chunk(file, "Ending balance $2,500.00", 0.9)
         answer = {"answer": "Your balance is $2,500.00 [bank_statement.pdf, page 1]", "citations": [{"file_id": str(file.file_id), "page": 1}], "support":[{"file_id":str(file.file_id),"page":1,"quote":"Ending balance $2,500.00"}]}
         with patch.object(chat.ollama, "embed", return_value=[0.1] * 768), \
-             patch.object(chat.ollama, "generate_json", return_value=answer) as model:
-            body = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement."}).json()
+             patch.object(generation, "generate_json", return_value=answer) as model:
+            body = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement.", "application_id": str(self.app_row.application_id)}).json()
         self.assertEqual(body["answer"], answer["answer"])
         self.assertEqual(body["evidence"][0]["content"], "Ending balance $2,500.00")
         self.assertIn("Ending balance $2,500.00", model.call_args.kwargs["prompt"])
 
     def test_chat_without_documents_and_with_index_down(self):
         with patch.object(chat.ollama, "embed", return_value=[0.1] * 768):
-            body = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement."}).json()
+            body = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement.", "application_id": str(self.app_row.application_id)}).json()
         self.assertEqual(body["citations"], [])
         with patch.object(chat.ollama, "embed", side_effect=chat.ollama.OllamaError("down")):
-            self.assertEqual(self.client.post("/api/v1/chat", json={"question": "hi"}).status_code, 200)
+            self.assertEqual(self.client.post("/api/v1/chat", json={"question": "hi", "application_id": str(self.app_row.application_id)}).status_code, 200)
         self.assertEqual(self.client.post("/api/v1/chat", json={"question": "  "}).status_code, 400)
 
     def test_chat_uses_saved_corrections_instead_of_stale_index(self):
@@ -202,8 +203,8 @@ class DatabaseTests(unittest.TestCase):
         self.db.commit()
         self._chunk(file, "Ending balance $2,500.00", 0.9)
         answer = {"answer": "Your corrected balance is 2600.00", "citations": [{"file_id": str(file.file_id), "page": 1}], "support":[{"file_id":str(file.file_id),"page":1,"quote":"2600.00"}]}
-        with patch.object(chat.ollama, "embed", return_value=[0.1] * 768), patch.object(chat.ollama, "generate_json", return_value=answer) as model:
-            response = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement."})
+        with patch.object(chat.ollama, "embed", return_value=[0.1] * 768), patch.object(generation, "generate_json", return_value=answer) as model:
+            response = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement.", "application_id": str(self.app_row.application_id)})
         self.assertEqual(response.status_code, 200)
         passages = json.loads(model.call_args.kwargs["prompt"].split("Evidence:\n", 1)[1].split("\n\nQuestion:", 1)[0])
         self.assertIn({"field":"ending_balance","value":"2600.00","origin":"customer_correction","role":"document_field","page":1}, passages[0]["saved_fields"])
@@ -229,7 +230,7 @@ class DatabaseTests(unittest.TestCase):
         self._chunk(file, "Private to the first application", 0.9)
         other = Application(customer_id=self.customer.customer_id)
         self.db.add(other); self.db.commit()
-        with patch.object(chat.ollama, "embed", return_value=[0.1] * 768), patch.object(chat.ollama, "generate_json") as generate:
+        with patch.object(chat.ollama, "embed", return_value=[0.1] * 768), patch.object(generation, "generate_json") as generate:
             response = self.client.post("/api/v1/chat", json={"question": "Explain the balance shown in my statement.", "application_id": str(other.application_id)})
         self.assertEqual(response.json()["evidence"], [])
         generate.assert_not_called()

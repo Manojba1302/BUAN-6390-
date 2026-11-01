@@ -21,6 +21,7 @@ from app.db.models import Application, File
 from app.agent import evaluation, streaming, generation
 from embedding_config import MODEL as EMBED_MODEL
 from app.services import application_chat, document_answers, structured_chat, chat_evidence, chat_tools, document_summaries, chat_privacy, chat_scope, missing_document_fields
+from app.services import attachments
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,8 @@ Rules:
 - Never state that a loan is approved, declined or likely. You do not decide that.
 - Customer-saved corrections override the original extracted values for the same field.
 - Evidence may describe different people. Do not assume its owner is the logged-in customer.
+- Different printed names establish a name mismatch, not verified identity or ownership. Report the printed names and explain that ownership cannot be verified from them alone.
+- Compare stated values only. Do not calculate totals or date intervals unless a calculation tool result is supplied in the evidence.
 - Copy citation file_id and page exactly from the evidence; never invent a source.
 - Distinguish contractual pay rate and its stated basis from period gross, net and year-to-date totals. Never infer a pay basis from an amount.
 - A difference between rate and gross does not establish overtime, extra hours, arrears or bonuses. State the reason is unknown unless explicitly documented.
@@ -51,6 +54,7 @@ Rules:
 - State the actual compared values from each source, not only that they match or differ.
 - Never output full SSNs, account numbers or license numbers; show only the last four digits.
 - Future pay and document ownership cannot be established from these records. Do not predict or verify them.
+- When citing a saved correction, copy its exact stored value into the support quote (for example 2029-12-31); do not reformat that quote as a written date.
 - Every citation requires a support entry with the same file_id/page and an exact quote copied from content or a saved field value.
 - Answer in two or three concise sentences. Omit unsupported details.
 - Keep support quotes short (at most 160 characters); use one quote per cited page.
@@ -85,11 +89,11 @@ def _ask(body, db, customer):
     return _search_answer(body, db, customer)
 
 
-def _policy_reply(question):
+def _policy_reply(question, document_context=False):
     """Off-topic and lending-decision questions get a fixed answer before any retrieval."""
     if DECISION.search(question):
         return _decision_reply()
-    if not chat_scope.allowed(question):
+    if not chat_scope.allowed(question, document_context):
         evaluation.route("scope")
         return chat_scope.reply()
     return None
@@ -115,7 +119,7 @@ def _search_answer(body, db, customer):
         return {"answer": "I could not find anything in your documents that answers that.",
                 "citations": [], "evidence": []}
     focused = chat_privacy.scoped(db, customer, body.application_id, _focus_passages(db, passages, body.question))
-    return _answer(question, focused) if focused else {"answer": "I could not find that document in this application.", "citations": [], "evidence": []}
+    return _answer(question, focused) if focused else {"answer": "I could not find that document " + ("in this application." if body.application_id else "in your vault."), "citations": [], "evidence": []}
 
 
 
@@ -150,15 +154,15 @@ def _inventory_question(question):
 def _inventory(db, customer, application_id, question=""):
     query = select(File).where(File.customer_id == customer.customer_id)
     if application_id is not None:
-        query = query.where(File.application_id == application_id)
+        query = query.where(attachments.attached_to(application_id))
     for pattern, tag in document_answers.TAGS:
         if re.search(pattern, question.lower()):
             query = query.where(File.document_tag == tag)
     files = db.scalars(query.order_by(File.uploaded_at.desc())).all()
     if not files:
-        return {"answer": "You have no documents attached to this application yet.", "citations": [], "evidence": []}
+        return {"answer": f"You have no documents {attachments.where(application_id)} yet.", "citations": [], "evidence": []}
     lines = [f"• {file.original_name} — {file.document_tag.replace('_', ' ')} ({file.status})" for file in files]
-    return {"answer": f"You have {len(files)} matching document(s) {'attached to this application' if application_id else 'in your account'}:\n" + "\n".join(lines),
+    return {"answer": f"You have {len(files)} matching document(s) {attachments.where(application_id)}:\n" + "\n".join(lines),
             "citations": [], "document_links": [{"file_id": str(file.file_id), "original_name": file.original_name} for file in files],
             "evidence": [{"file_id": str(file.file_id), "page": 1, "original_name": file.original_name,
                           "content": "Document inventory from your account"} for file in files]}
@@ -166,7 +170,7 @@ def _inventory(db, customer, application_id, question=""):
 
 def _check_application(db, customer, application_id):
     if application_id is None:
-        return
+        return                      # no application: the chat answers from the whole vault
     application = db.get(Application, application_id)
     if application is None or application.customer_id != customer.customer_id:
         raise HTTPException(404, "Application not found")
@@ -284,4 +288,4 @@ def _application_or_policy(body, db, customer):
     if reply is not None:
         evaluation.route("application_status")
         return reply
-    return _policy_reply(body.question)
+    return _policy_reply(body.question, chat_evidence.needs_general(db, customer, body.application_id, body.question))

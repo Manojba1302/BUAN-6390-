@@ -23,3 +23,4 @@ import "./bank-layout.css";
 
 import "./typography.css";
 import "./theme.css";
+import "./vault.css";
