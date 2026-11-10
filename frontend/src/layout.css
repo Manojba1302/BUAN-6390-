@@ -1,0 +1,25 @@
+/* HomeFlow page width.
+   Loaded last (see main.tsx) so it is the single place that decides how wide pages get.
+   Earlier stylesheets each capped the page at a different width (1200, 1240, 1320, 1400px),
+   which left large empty margins on wide screens. This only changes width and side padding;
+   the layout and placement of everything stays as it was. Tune the two variables below. */
+:root {
+  --hf-page: 1600px;                        /* widest the content gets */
+  --hf-gutter: clamp(16px, 3.2vw, 56px);    /* side padding, shrinks on small screens */
+}
+
+/* One container width for the top bar, the page body and the progress strip */
+html body .app .topbar-in,
+html body .app .tracker-in,
+html body .home-hero,
+html body .app .body,
+html body .app .body.vault-body {
+  max-width: var(--hf-page) !important;
+  width: 100%;
+  margin-left: auto !important; margin-right: auto !important;
+  padding-left: var(--hf-gutter) !important; padding-right: var(--hf-gutter) !important;
+  box-sizing: border-box;
+}
+
+/* The in-form actions follow the width of their application panel. */
+html body .app .main .footnav-in { max-width: none; }

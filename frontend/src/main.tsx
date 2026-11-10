@@ -24,3 +24,4 @@ import "./bank-layout.css";
 import "./typography.css";
 import "./theme.css";
 import "./vault.css";
+import "./layout.css";   // page width and layout; keep this import last
