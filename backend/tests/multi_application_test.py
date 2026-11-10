@@ -73,6 +73,17 @@ class MultiApplicationTests(unittest.TestCase):
         doc = self.client.get(f"/api/v1/documents/{file_id}").json()
         self.assertEqual({a["application_id"] for a in doc["applications"]}, {str(self.a.application_id), str(self.b.application_id)})
 
+    def test_detaching_middle_link_after_reattaching_oldest(self):
+        third = Application(customer_id=self.customer.customer_id, status="draft")
+        self.db.add(third)
+        self.db.commit()
+        file_id = self._license()
+        for application in (self.a, self.b, third, self.a):
+            self.assertEqual(self._attach(file_id, application)[0].status_code, 200)
+        response = self.client.delete(f"/api/v1/documents/{file_id}?application_id={self.b.application_id}")
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual([self._in(a) for a in (self.a, self.b, third)], [[file_id], [], [file_id]])
+
     def test_each_application_gets_the_documents_values(self):
         file_id = self._license()
         self._attach(file_id, self.a); self._attach(file_id, self.b)

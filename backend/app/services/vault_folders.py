@@ -22,27 +22,6 @@ NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 &'().,-]{0,39}")
 # What a stored-only document is ("Last Will", "Vehicle Title"): shown in the vault, nothing is extracted.
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9 &'().,/-]{0,59}")
 
-_table_ready = False
-
-
-def ensure_table(db) -> None:
-    """Older databases predate this table; create it once per process (db/init/009 does it on a fresh one)."""
-    global _table_ready
-    if _table_ready:
-        return
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS vault_folder (
-            customer_id UUID NOT NULL REFERENCES customer(customer_id) ON DELETE CASCADE,
-            name        TEXT NOT NULL,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-            PRIMARY KEY (customer_id, name));
-        CREATE TABLE IF NOT EXISTS vault_document_label (
-            file_id UUID PRIMARY KEY REFERENCES file(file_id) ON DELETE CASCADE,
-            label   TEXT NOT NULL)"""))
-    db.commit()
-    _table_ready = isinstance(db, Session)
-
-
 def default_for(tag: str) -> str:
     return TAG_FOLDER.get(tag, "Other")
 
@@ -54,7 +33,6 @@ def folder_of(logical_path: str | None, tag: str) -> str:
 
 
 def custom(db, customer_id) -> list[str]:
-    ensure_table(db)
     rows = db.execute(text("SELECT name FROM vault_folder WHERE customer_id = :c ORDER BY lower(name)"),
                       {"c": customer_id}).scalars().all()
     return [name for name in rows if name not in DEFAULT_FOLDERS]
@@ -118,17 +96,14 @@ def set_label(db, file_id, label: str | None) -> None:
         return
     if not LABEL.fullmatch(clean):
         raise HTTPException(400, "Use up to 60 letters, numbers, spaces or & ' ( ) . , / - to describe the document.")
-    ensure_table(db)
     db.execute(text("""INSERT INTO vault_document_label (file_id, label) VALUES (:f, :l)
                        ON CONFLICT (file_id) DO UPDATE SET label = EXCLUDED.label"""), {"f": file_id, "l": clean})
 
 
 def clear_label(db, file_id) -> None:
-    ensure_table(db)
     db.execute(text("DELETE FROM vault_document_label WHERE file_id = :f"), {"f": file_id})
 
 
 def label_of(db, file_id) -> str | None:
-    ensure_table(db)
     value = db.execute(text("SELECT label FROM vault_document_label WHERE file_id = :f"), {"f": file_id}).scalar()
     return value if isinstance(value, str) else None

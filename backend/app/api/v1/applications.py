@@ -18,7 +18,10 @@ from app.db.models import (
 from app.core.security import current_customer
 from app.db.session import get_db
 from app.services import audit, income_validation, employment_suggestions, address_suggestions, name_suggestions, prefill as prefill_service
-from app.services import attachments
+from fastapi.encoders import jsonable_encoder
+from urllib.parse import quote
+from app.db.models import SubmissionFile, SubmissionRecord
+from app.services import attachments, storage, versions
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -42,16 +45,10 @@ def _owned(db: Session, application_id: UUID, customer: Customer) -> Application
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_application(db: Session = Depends(get_db),
-                       customer: Customer = Depends(current_customer)) -> dict:
-    app = Application(customer_id=customer.customer_id)
-    db.add(app)
-    db.flush()
-    _account_defaults(db, app, customer)
-    audit.record(db, action="application.created",
-                 customer_id=customer.customer_id, application_id=app.application_id)
-    db.commit()
-    return {"application_id": str(app.application_id), "status": app.status}
+def create_application(customer: Customer = Depends(current_customer)) -> dict:
+    """Applications start only from a lender's invitation (lender_link.select_application), so each one belongs to a loan."""
+    raise HTTPException(status.HTTP_403_FORBIDDEN,
+                        "Applications start from your loan officer's invitation. Open the link in their email to begin.")
 
 
 @router.get("")
@@ -75,6 +72,9 @@ def checklist(application_id: UUID, db: Session = Depends(get_db),
               customer: Customer = Depends(current_customer)) -> list[dict]:
     """The loan card on the vault page: each document this loan needs, how many are in, and which files."""
     app = _owned(db, application_id, customer)
+    frozen = db.get(SubmissionRecord, application_id) if app.status == "submitted" else None
+    if frozen:
+        return frozen.checklist
     return [_checklist_row(db, app, req) for req in _requirements(db, app)]
 
 
@@ -90,6 +90,9 @@ def _checklist_row(db: Session, app: Application, req: ChecklistRequirement) -> 
 def get_application(application_id: UUID, db: Session = Depends(get_db),
                     customer: Customer = Depends(current_customer)) -> dict:
     app = _owned(db, application_id, customer)
+    frozen = db.get(SubmissionRecord, application_id) if app.status == "submitted" else None
+    if frozen:
+        return frozen.state
     if app.status == "draft" and _account_defaults(db, app, customer):
         db.commit()
     prefill_service.apply_pending(db, application_id=app.application_id)
@@ -122,6 +125,7 @@ def patch_application(application_id: UUID, patch: ApplicationPatch,
                       db: Session = Depends(get_db),
                       customer: Customer = Depends(current_customer)) -> dict:
     app = _owned(db, application_id, customer)
+    db.refresh(app, with_for_update=True)
     if app.status != "draft":
         raise HTTPException(status.HTTP_409_CONFLICT, "A submitted application cannot be edited")
 
@@ -228,6 +232,9 @@ def progress(application_id: UUID, db: Session = Depends(get_db),
              customer: Customer = Depends(current_customer)) -> dict:
     """What the tracker draws: per step, what is still missing."""
     app = _owned(db, application_id, customer)
+    frozen = db.get(SubmissionRecord, application_id) if app.status == "submitted" else None
+    if frozen:
+        return frozen.progress
     data = _serialise(db, app)
     values = {k: v["value"] for k, v in data["fields"].items()}
     steps = [_step_status(db, app, step, data, values) for step in _dictionary()["steps"]]
@@ -376,14 +383,37 @@ def prefill(application_id: UUID, db: Session = Depends(get_db),
 @router.post("/{application_id}/submit")
 def submit(application_id: UUID, db: Session = Depends(get_db),
            customer: Customer = Depends(current_customer)) -> dict:
-    app = _owned(db, application_id, customer)
+    app = db.scalar(select(Application).where(
+        Application.application_id == application_id,
+        Application.customer_id == customer.customer_id).with_for_update())
+    if app is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+    if app.status != "draft":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only a draft application can be submitted.")
     state = progress(application_id, db, customer)
     if not state["complete"]:
         blocking = [m for s in state["steps"] for m in s["missing"]]
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                             {"message": "Some answers are still missing", "missing": blocking})
 
+    from app.api.v1.documents import _summary
+    files = db.scalars(select(File).where(attachments.attached_to(application_id))
+                       .order_by(File.uploaded_at.desc(), File.file_id)).all()
+    summaries = [dict(_summary(db, row), submitted_copy=True, application_id=str(application_id),
+                      application_status="submitted") for row in files]
+    checks = checklist(application_id, db, customer)
     app.status = "submitted"
+    db.add(SubmissionRecord(application_id=application_id, state=jsonable_encoder(_serialise(db, app)),
+                            progress={**state, "status": "submitted"}, checklist=checks, documents=summaries))
+    db.flush()
+    for row in files:
+        body = storage.get_object(row.storage_key)
+        if row.checksum and storage.checksum(body) != row.checksum:
+            raise HTTPException(503, "Document verification failed. Your application remains a draft.")
+        db.add(SubmissionFile(application_id=application_id, file_id=row.file_id,
+                              family_id=versions.chain(db, row.file_id)[0].file_id,
+                              original_name=row.original_name, body=body))
+        db.flush()
     app.submitted_at = datetime.now(timezone.utc)
     audit.record(db, action="application.submitted",
                  customer_id=customer.customer_id, application_id=app.application_id)
@@ -392,20 +422,44 @@ def submit(application_id: UUID, db: Session = Depends(get_db),
             "reference": f"HF-{app.application_id.hex[:8].upper()}"}   # the same reference the customer sees everywhere else
 
 
+@router.get("/{application_id}/submitted-documents/{file_id}")
+def submitted_document(application_id: UUID, file_id: UUID, db: Session = Depends(get_db),
+                       customer: Customer = Depends(current_customer)) -> Response:
+    _owned(db, application_id, customer)
+    row = db.get(SubmissionFile, (application_id, file_id))
+    if row is None:
+        raise HTTPException(404, "Submitted copy unavailable.")
+    return Response(row.body, media_type="application/octet-stream", headers={
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": "attachment; filename*=UTF-8''" + quote(row.original_name, safe=""),
+    })
+
+
 @router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_draft(application_id: UUID, db: Session = Depends(get_db),
                  customer: Customer = Depends(current_customer)) -> Response:
     """A draft no lender has seen can be deleted outright: its answers, progress and chat go with it.
     Its documents belong to the customer and stay in the vault, still in any other application."""
     app = _owned(db, application_id, customer)
+    db.refresh(app, with_for_update=True)
     if app.status != "draft":
         raise HTTPException(status.HTTP_409_CONFLICT, "Only a draft can be deleted. This application was already sent.")
+    _refuse_if_shared(customer, app.application_id)
     _release_files(db, app.application_id)
     db.execute(delete(Application).where(Application.application_id == app.application_id))
     audit.record(db, action="application.deleted", customer_id=customer.customer_id,
                  payload={"application_id": str(application_id)})
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _refuse_if_shared(customer: Customer, application_id: UUID) -> None:
+    """An application a lender invited the borrower to belongs to that loan; only the lender can withdraw it."""
+    from app.api.v1 import lender_link
+    lenders = lender_link.linked_lenders(customer.customer_id, application_id)
+    if lenders:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"This application belongs to your loan with {lenders[0]['lender']}. Ask your loan officer if you need to withdraw it.")
 
 
 def _release_files(db: Session, application_id: UUID) -> None:

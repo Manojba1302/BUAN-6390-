@@ -67,9 +67,11 @@ class ApplicationChatTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as caught:self.ask("What is my application status?",uuid4())
         self.assertEqual(caught.exception.status_code,404)
 
-    def test_no_application_asks_for_selection(self):
+    def test_no_application_answers_for_each_application(self):
+        # Changed November 2026: the vault chat answers for every application instead of asking for one.
         result=service.answer(self.db,self.customer,None,"What documents are missing?")
-        self.assertIn("Open an application",result["answer"])
+        self.assertIn(service.name(self.db,self.app_row)+":",result["answer"])
+        self.assertIn("more needed",result["answer"])
 
     def test_approval_guard_preserved(self):
         self.assertIn("can't tell",self.ask("Am I approved? What is my application status?")["answer"])

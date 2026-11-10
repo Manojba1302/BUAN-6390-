@@ -74,7 +74,7 @@ class DocumentVersionTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/v1/documents/{old}/content").status_code, 200)   # still viewable by the owner
         self.assertEqual(self.client.get(f"/api/v1/documents/{old}").json()["version"], 1)
 
-    def test_every_application_moves_to_the_new_version_and_drops_old_proposals(self):
+    def test_only_drafts_move_to_the_new_version_and_drop_old_proposals(self):
         old = self._upload()
         for application in (self.draft, self.sent):
             self.client.post(f"/api/v1/documents/{old}/link", json={"application_id": str(application.application_id)})
@@ -84,17 +84,48 @@ class DocumentVersionTests(unittest.TestCase):
                                    file_id=uuid.UUID(old), review_state="proposed"))
             s.add(ApplicationField(application_id=self.draft.application_id, field_name="dob", value="1990-01-01",
                                    file_id=uuid.UUID(old), review_state="confirmed"))
-            s.get(Application, self.sent.application_id).status = "submitted"; s.commit()
+            s.commit()
+        aid = self.sent.application_id
+        base = f"/api/v1/applications/{aid}"
+        original = self.client.get(f"/api/v1/documents/{old}/content").content
+        with patch("app.api.v1.applications.progress", return_value={"complete": True, "steps": [], "percent": 100}):
+            submitted = self.client.post(base + "/submit")
+        self.assertEqual(submitted.status_code, 200, submitted.text)
         new = self._replace(old).json()["file_id"]
         for application in (self.draft, self.sent):
             listed = [d["file_id"] for d in self.client.get(f"/api/v1/documents?application_id={application.application_id}").json()]
-            self.assertEqual(listed, [new])
+            self.assertEqual(listed, [new if application is self.draft else old])
         with SessionLocal() as s:
             self.assertIsNone(s.get(ApplicationField, (self.draft.application_id, "base_income")))   # proposal from v1 gone
             self.assertEqual(s.get(ApplicationField, (self.draft.application_id, "dob")).value, "1990-01-01")  # customer's own stays
         self.assertEqual(self.published.call_args.kwargs["file_id"], uuid.UUID(new))
         events = self.db.query(AuditEvent).filter_by(action="document.replaced", file_id=uuid.UUID(new)).all()
-        self.assertEqual(set(events[0].payload["applications"]), {str(self.draft.application_id), str(self.sent.application_id)})
+        self.assertEqual(set(events[0].payload["applications"]), {str(self.draft.application_id)})
+        self._read(new)
+        self.assertEqual(self.client.delete(f"/api/v1/documents/{new}/permanent").status_code, 204)
+        url = base + f"/submitted-documents/{old}"
+        self.assertEqual(self.client.get(url).content, original)
+        self.assertEqual(self._vault(), [])
+        self.assertEqual([d["file_id"] for d in self.client.get(f"/api/v1/documents?application_id={aid}").json()], [old])
+        loan = uuid.uuid4()
+        with patch("app.api.v1.lender_link.lender_request", return_value={"status": "sent"}) as send:
+            rejected = self.client.post(f"{base}/lenders/{loan}/documents/{new}")
+            self.assertEqual(rejected.status_code, 404)
+            send.assert_not_called()
+            self.assertEqual(self.client.post(f"{base}/lenders/{loan}/documents/{old}").status_code, 200)
+            self.assertEqual(send.call_args.kwargs["files"]["file"][1], original)
+        app.dependency_overrides[current_customer] = lambda: Customer(customer_id=uuid.uuid4())
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_unreadable_submission_rolls_back(self):
+        fid = self._upload()
+        aid = self.sent.application_id
+        self.client.post(f"/api/v1/documents/{fid}/link", json={"application_id": str(aid)})
+        with patch("app.api.v1.applications.progress", return_value={"complete": True}), patch.object(
+                documents.storage, "get_object", return_value=b"wrong bytes"):
+            self.assertEqual(self.client.post(f"/api/v1/applications/{aid}/submit").status_code, 503)
+        self.assertEqual(self.client.get(f"/api/v1/applications/{aid}").json()["status"], "draft")
+        self.assertEqual(self.client.get(f"/api/v1/applications/{aid}/submitted-documents/{fid}").status_code, 404)
 
     def test_only_the_newest_version_can_be_replaced_and_not_while_reading(self):
         old = self._upload()

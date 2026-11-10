@@ -43,6 +43,24 @@ class Application(Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SubmissionRecord(Base):
+    __tablename__ = "submission_record"
+    application_id: Mapped[UUID] = mapped_column(ForeignKey("application.application_id", ondelete="CASCADE"), primary_key=True)
+    state: Mapped[dict] = mapped_column(JSONB)
+    progress: Mapped[dict] = mapped_column(JSONB)
+    checklist: Mapped[list] = mapped_column(JSONB)
+    documents: Mapped[list] = mapped_column(JSONB)
+
+
+class SubmissionFile(Base):
+    __tablename__ = "submission_file"
+    application_id: Mapped[UUID] = mapped_column(ForeignKey("submission_record.application_id", ondelete="CASCADE"), primary_key=True)
+    file_id: Mapped[UUID] = mapped_column(PgUUID, primary_key=True)
+    family_id: Mapped[UUID] = mapped_column(PgUUID)
+    original_name: Mapped[str] = mapped_column(Text)
+    body: Mapped[bytes]
+
+
 class ApplicationField(Base):
     __tablename__ = "application_field"
     application_id: Mapped[UUID] = mapped_column(

@@ -20,6 +20,7 @@ from app.core.security import current_customer
 from app.db.models import (
     Application, ApplicationField, Asset, Employment, Customer, AuditEvent, DocumentMarkdown, Extraction, File, FileClassification,
 )
+from app.db.models import SubmissionRecord
 from app.db.session import get_db
 from app.services import attachments, audit, classifier, queue, storage, saved_document_evidence, vault_folders, versions
 
@@ -101,9 +102,11 @@ def _check_application(db: Session, application_id: UUID | None, customer: Custo
     """A file can only be attached to the caller's own application."""
     if application_id is None:
         return
-    app = db.get(Application, application_id)
+    app = db.get(Application, application_id, with_for_update=True)
     if app is None or app.customer_id != customer.customer_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+    if app.status != "draft":
+        raise HTTPException(409, "Documents can only be added to a draft application.")
 
 
 def _store_file(db: Session, customer: Customer, upload: UploadFile, body: bytes, document_tag: str,
@@ -138,7 +141,15 @@ def list_documents(application_id: UUID | None = None, document_tag: str | None 
                    db: Session = Depends(get_db),
                    customer: Customer = Depends(current_customer)) -> list[dict]:
     """The vault. Scoped to the caller, always."""
-    stmt = select(File).where(File.customer_id == customer.customer_id, versions.current_only())
+    stmt = select(File).where(File.customer_id == customer.customer_id)
+    if application_id:
+        app = db.get(Application, application_id)
+        if app and app.customer_id == customer.customer_id and app.status == "submitted":
+            frozen = db.get(SubmissionRecord, application_id)
+            if frozen:
+                return [d for d in frozen.documents if not document_tag or d["document_tag"] == document_tag]
+    else:
+        stmt = stmt.where(versions.current_only())
     if application_id:
         stmt = stmt.where(attachments.attached_to(application_id))
     if document_tag:
@@ -298,7 +309,7 @@ class LinkIn(BaseModel):
 
 
 def _editable_link(db: Session, application_id: UUID | None) -> None:
-    app = db.get(Application, application_id) if application_id else None
+    app = db.get(Application, application_id, with_for_update=True) if application_id else None
     if app and app.status != "draft":
         raise HTTPException(409, "Submitted application documents cannot be removed.")
 
@@ -320,7 +331,7 @@ def _clear_proposals(db: Session, row: File, application_id: UUID | None) -> Non
 def link_document(file_id: UUID, body: LinkIn, db: Session = Depends(get_db),
                   customer: Customer = Depends(current_customer)) -> dict:
     row = _owned_file(db, file_id, customer)
-    app = db.get(Application, body.application_id)
+    app = db.get(Application, body.application_id, with_for_update=True)
     if not app or app.customer_id != customer.customer_id:
         raise HTTPException(404, "Application not found")
     if app.status != "draft":
@@ -403,6 +414,11 @@ def delete_permanently(file_id: UUID, db: Session = Depends(get_db),
     every = versions.chain(db, row.file_id)
     if any(f.status in ("queued", "processing") for f in every):
         raise HTTPException(409, "Wait for document processing to finish before deleting.")
+    for version in every:
+        for app in attachments.applications_of(db, version.file_id):
+            db.refresh(app, with_for_update=True)
+            if app.status != "draft" and not db.get(SubmissionRecord, app.application_id):
+                raise HTTPException(409, "This earlier submission needs an archived copy before deletion.")
     for version in reversed(every):
         _delete_one(db, version, customer)
     db.commit()
@@ -411,6 +427,11 @@ def delete_permanently(file_id: UUID, db: Session = Depends(get_db),
 
 def _delete_one(db: Session, row: File, customer: Customer) -> None:
     for app in attachments.applications_of(db, row.file_id):
+        db.refresh(app, with_for_update=True)
+        if app.status != "draft":
+            if not db.get(SubmissionRecord, app.application_id):
+                raise HTTPException(409, "This earlier submission needs an archived copy before deletion.")
+            continue
         _clear_proposals(db, row, app.application_id)
     _detach_confirmed_values(db, row.file_id)
     _delete_markdown(db, row.file_id)
@@ -424,9 +445,7 @@ def _delete_one(db: Session, row: File, customer: Customer) -> None:
 @router.post("/{file_id}/replace", status_code=status.HTTP_201_CREATED)
 async def replace(file_id: UUID, file: UploadFile = UploadField(...), db: Session = Depends(get_db),
                   customer: Customer = Depends(current_customer)) -> dict:
-    """A new version of a vault document. The earlier one is kept under its versions, and every
-    application that used it now uses the new one, submitted ones included (only the attached
-    version is viewable at a given time). Each move is recorded for the loan team."""
+    """Create a vault version and move draft applications to it."""
     old = _replaceable(db, file_id, customer)
     body = await file.read()
     _check_upload(file, body, old.document_tag)
@@ -454,9 +473,12 @@ def _replaceable(db: Session, file_id: UUID, customer: Customer) -> File:
 
 
 def _move_attachments(db: Session, old: File, new: File) -> list[str]:
-    """Every application that had the old version gets the new one in its place."""
+    """Keep each submission pinned to its original version."""
     moved = []
     for app in attachments.applications_of(db, old.file_id):
+        db.refresh(app, with_for_update=True)
+        if app.status != "draft":
+            continue
         _clear_proposals(db, old, app.application_id)
         attachments.attach(db, new, app.application_id)
         attachments.detach(db, old, app.application_id)

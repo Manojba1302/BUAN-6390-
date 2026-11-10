@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import applications, auth, google_auth, chat, conversations, template_documents, documents, fields, health
+from app.api.v1 import lender_link
 from app.core.config import settings
 from app.services import storage
 
@@ -26,7 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for router in (auth.router, google_auth.router, health.router, fields.router, applications.router,
+for router in (lender_link.router, auth.router, google_auth.router, health.router, fields.router, applications.router,
                documents.router, chat.router, conversations.router, template_documents.router):
     app.include_router(router, prefix=settings.api_prefix)
 
@@ -39,6 +40,9 @@ def on_startup() -> None:
         table.create(engine, checkfirst=True)
     _fix_checklist_spelling(engine)
     from app.services import attachments
+    from app.db.models import SubmissionRecord, SubmissionFile
+    SubmissionRecord.__table__.create(engine, checkfirst=True)
+    SubmissionFile.__table__.create(engine, checkfirst=True)
     attachments.ensure(engine)               # one document in several applications
     from app.services import versions
     versions.ensure(engine)                  # replace keeps earlier versions

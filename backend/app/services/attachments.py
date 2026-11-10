@@ -60,8 +60,10 @@ def detach(db: Session, row: File, application_id: UUID) -> None:
     if link is not None:
         db.delete(link)
         db.flush()
+    db.execute(text("SET LOCAL homeflow.keep_links = 'on'"))
     remaining = applications_of(db, row.file_id)
     row.application_id = remaining[-1].application_id if remaining else None
+    db.flush()
 
 
 def ensure(engine) -> None:

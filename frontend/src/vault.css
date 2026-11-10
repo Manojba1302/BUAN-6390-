@@ -258,25 +258,9 @@ html body .app .main .vs-greet { display: flex; flex-wrap: wrap; align-items: ce
 html body .app .main .vs-greet h1 { margin: 0 !important; font-family: var(--font-display) !important; font-size: clamp(28px, 3vw, 36px) !important; line-height: 1.08 !important; letter-spacing: -.035em !important; font-weight: 650 !important; color: #fff !important; }
 html body .app .main .vs-art { position: relative; z-index: 1; width: 100%; height: auto; display: block; }
 
-/* New application: lime fills in from the left, the + turns, a soft ring breathes a few times */
-html body .app .main .vs-newapp { position: relative; overflow: hidden; isolation: isolate; display: inline-flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 18px 0 6px;
-  border-radius: 999px; border: 1.5px solid rgba(201, 242, 123, .65); background: rgba(201, 242, 123, .06); color: var(--hf-lime); font: 650 15px var(--font-ui); cursor: pointer;
-  transition: color .35s cubic-bezier(.2, .8, .2, 1), border-color .35s, transform .15s; animation: vs-breathe 2.8s ease-in-out 3; }
-html body .app .main .vs-newapp::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--hf-lime); transform: scaleX(0); transform-origin: left center; transition: transform .45s cubic-bezier(.2, .8, .2, 1); }
-html body .app .main .vs-newapp::after { content: ""; position: absolute; top: 0; bottom: 0; left: -40%; width: 30%; z-index: -1; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .35), transparent); transform: skewX(-20deg); animation: vs-sheen 3.6s ease-in-out 1s 2; }
-html body .app .main .vs-newapp-ic { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--hf-lime); color: var(--hf-ink); transition: transform .45s cubic-bezier(.2, .8, .2, 1), background .35s, color .35s; }
-html body .app .main .vs-newapp-ic svg { width: 17px; height: 17px; }
-html body .app .main .vs-newapp:not(:disabled):hover, html body .app .main .vs-newapp:focus-visible { color: var(--hf-ink); border-color: var(--hf-lime); animation: none; }
-html body .app .main .vs-newapp:not(:disabled):hover::before, html body .app .main .vs-newapp:focus-visible::before { transform: scaleX(1); }
-html body .app .main .vs-newapp:not(:disabled):hover .vs-newapp-ic, html body .app .main .vs-newapp:focus-visible .vs-newapp-ic { transform: rotate(90deg); background: var(--hf-ink); color: var(--hf-lime); }
-html body .app .main .vs-newapp:active { transform: scale(.97); }
-html body .app .main .vs-newapp:disabled { opacity: .7; cursor: progress; }
-html body .app .main .vs-newapp:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
-@keyframes vs-breathe { 0%, 100% { box-shadow: 0 0 0 0 rgba(201, 242, 123, 0); } 50% { box-shadow: 0 0 0 7px rgba(201, 242, 123, .16); } }
-@keyframes vs-sheen { 0% { left: -40%; } 60%, 100% { left: 120%; } }
-
 /* your applications: one small pill each */
 html body .app .main .vs-apps { margin-top: 14px; }
+html body .app .main .vs-invite-note { margin: 12px 0 0; max-width: 44ch; color: rgba(255,255,255,.82); font-size: 15px; line-height: 1.5; }
 html body .app .main .vs-apps h2 { margin: 0 0 10px !important; font: 650 12.5px var(--font-ui) !important; letter-spacing: .16em; text-transform: uppercase; color: var(--hf-lime) !important; }
 html body .app .main .vs-pills { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
 html body .app .main .vs-pill-wrap { position: relative; display: flex; align-items: center; gap: 4px; }
@@ -450,7 +434,6 @@ html body .app .main .vs-docs.cards .vs-note { grid-column: 1 / -1; }
   html body .app .main .vs-main { padding: 14px 12px; }
 }
 @media (max-width: 560px) {
-  html body .app .main .vs-newapp { flex: 1 1 100%; justify-content: center; }
   html body .app .main .vs-pill-wrap, html body .app .main .vs-pill { width: 100%; }
   html body .app .main .vs-pill { padding-right: 10px; }
   html body .app .main .vs-pill b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
@@ -463,6 +446,5 @@ html body .app .main .vs-docs.cards .vs-note { grid-column: 1 / -1; }
   html body .app .main .vs-note { grid-column: 1 / -1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  html body .app .main .vs-newapp, html body .app .main .vs-newapp::before, html body .app .main .vs-newapp::after, html body .app .main .vs-newapp-ic,
   html body .app .main .vs-thumb, html body .app .main .vs-fi, html body .app .main .vs-types li, html body .app .main .s-reading i, html body .app .main .vs-pill > svg:last-child { animation: none !important; transition: none !important; }
 }

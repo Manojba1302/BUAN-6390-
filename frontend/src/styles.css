@@ -124,6 +124,12 @@ h1,h2,h3,p{margin:0}
 .card > h2{font-size:19px;font-weight:600;letter-spacing:-.01em}
 .card > h2 + .hint{margin-top:4px}
 .hint{font-size:13.5px;color:var(--muted)}
+.send-lender{display:grid;gap:14px}
+.send-lender label{display:grid;gap:6px;font-size:14px;font-weight:600}
+.send-lender p{margin:0}
+.send-lender h3{margin:0;font-size:16px}
+.send-lender section{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.send-lender .btn{justify-self:start}
 .grid{display:grid;gap:16px;margin-top:18px}
 .g2{grid-template-columns:1fr 1fr}
 .g3{grid-template-columns:1fr 1fr 1fr}

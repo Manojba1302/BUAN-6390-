@@ -132,6 +132,7 @@ export interface ClassifyResult {
 }
 
 export interface DocumentSummary {
+  submitted_copy?: boolean;
   extracted_field_count: number;
   missing_field_count: number;
   file_id: string;

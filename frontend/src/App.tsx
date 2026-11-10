@@ -12,6 +12,8 @@ import { validate } from "./format";
 import { Icon } from "./icons";
 import { FormStep, type Provenance } from "./Steps";
 import { FootNav, Rail, StepHero, useToast } from "./ui";
+import { SendDocument } from "./SendDocument";
+import { LenderInvitation } from "./LenderInvitation";
 import { VaultHome } from "./VaultHome";
 import type {
   ApplicationListItem, ApplicationState, ChecklistItem, Dictionary, DocumentSummary, Progress, NameSuggestion, AddressSuggestion, EmploymentSuggestion,
@@ -40,7 +42,6 @@ export function App() {
   const [openDoc, setOpenDoc] = useState<string | null>(null);
   const [vaultOpen, setVaultOpen] = useState(true);
   const [applications, setApplications] = useState<ApplicationListItem[]>([]);
-  const [creating, setCreating] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatStarted, setChatStarted] = useState(false);
   const [chatUnread, setChatUnread] = useState(false);
@@ -152,20 +153,6 @@ export function App() {
       window.scrollTo({ top: 0 });
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "We could not open this application.");
-    }
-  }
-
-  async function createApplication() {
-    if (creating) return;
-    setCreating(true);
-    try {
-      const { application_id } = await api.createApplication();
-      setApplications(await api.listApplications().catch(() => applications));
-      await openApplication(application_id, 0);
-    } catch (err) {
-      toast(err instanceof ApiError ? err.message : "We could not start a new application.");
-    } finally {
-      setCreating(false);
     }
   }
 
@@ -353,7 +340,7 @@ export function App() {
                 <p>{documents.length ? `${documents.length} document${documents.length === 1 ? "" : "s"} attached to your application. Open My vault to review their status.` : "No documents uploaded yet. Visit Documents to see what to provide."}</p>
               </> : <>
                 <p>{vaultDocuments.length ? `${vaultDocuments.length} document${vaultDocuments.length === 1 ? "" : "s"} saved in your vault.` : "Your vault is empty. Add a document to keep it safe here."}</p>
-                <p>{applications.some(a => a.status === "draft") ? "You have an application in progress. Continue it from the top of your vault." : "No application in progress. Choose Create new application when you are ready."}</p>
+                <p>{applications.some(a => a.status === "draft") ? "You have an application in progress. Continue it from the top of your vault." : "No application yet. When your loan officer invites you, open the link in their email to start one."}</p>
               </>}
             </section>
           </details>
@@ -393,17 +380,20 @@ export function App() {
       <div className={`body ${inApplication ? "" : "vault-body"}`}>
         {inApplication && <Rail dictionary={dictionary} progress={progress} step={step} onGo={goTo} />}
         <main className="main" ref={main} tabIndex={-1}>
+          <LenderInvitation onAccepted={id=>{void refreshVault();void openApplication(id,0);}} />
           {!inApplication || !appId || !stepSpec ? (
-            <VaultHome firstName={user.first_name || undefined} documents={vaultDocuments} applications={applications} creating={creating}
+            <VaultHome firstName={user.first_name || undefined} documents={vaultDocuments} applications={applications}
                        onOpen={setOpenDoc} onChanged={() => void refreshVault().catch(() => {})}
-                       onCreateApplication={() => void createApplication()}
                        onContinue={a => void openApplication(a.application_id, a.current_step ?? 0)} />
           ) : <>
           <p className="application-title">My Loan Application · {`HF-${appId.replaceAll("-", "").slice(0, 8).toUpperCase()}`}</p>
           {stepSpec.id === "documents" ? (
-            <DocumentsStep applicationId={appId} checklist={checklist.map(c => ["Self-employed", "Retired", "Not currently employed", "Other"].includes(values.employmentStatus) && ["w2", "paystub"].includes(c.document_tag) ? { ...c, required_count: 0, guidance: "Optional for your current employment situation. You can still upload this document if it applies to you." } : c)} documents={documents} vaultDocuments={vaultDocuments}
+            <>{progress?.status === "submitted" ? <section className="card"><h2>Submitted documents</h2>
+              {documents.map(doc => <p key={doc.file_id}><a href={doc.submitted_copy ? api.submittedContentUrl(appId, doc.file_id) : api.contentUrl(doc.file_id)}>{doc.original_name}</a></p>)}
+              {!documents.length && <p>No documents attached.</p>}
+            </section> : <DocumentsStep applicationId={appId} checklist={checklist.map(c => ["Self-employed", "Retired", "Not currently employed", "Other"].includes(values.employmentStatus) && ["w2", "paystub"].includes(c.document_tag) ? { ...c, required_count: 0, guidance: "Optional for your current employment situation. You can still upload this document if it applies to you." } : c)} documents={documents} vaultDocuments={vaultDocuments}
                            header={<StepHero dictionary={dictionary} step={step} title="Your documents" lede={DOCUMENTS_LEDE} />}
-                           onUploaded={() => void load(appId)} onOpenDoc={setOpenDoc} />
+                           onUploaded={() => void load(appId)} onOpenDoc={setOpenDoc} />}<SendDocument key={appId} app={appId} documents={documents} /></>
           ) : (
             <FormStep dictionary={dictionary} step={stepSpec} values={values} errors={errors}
                       provenance={provenance} declarations={declarations} rows={rows}
@@ -437,6 +427,8 @@ export function App() {
       {templateOpen && appId && <TemplateDocuments applicationId={appId} onClose={()=>setTemplateOpen(false)}/>}
       {chatStarted && <DocumentChat key={chatAppId ?? "vault"} applicationId={chatAppId} owner={user.customer_id} minimized={!chatOpen || !!openDoc}
         onUnread={() => setChatUnread(true)} onClose={() => setChatOpen(false)} onOpenSource={setOpenDoc}
+        onUpload={() => { const documentsStep = dictionary.steps.findIndex(s => s.id === "documents");
+          if (inApplication && documentsStep >= 0) void goTo(documentsStep); else window.dispatchEvent(new Event("homeflow:upload")); }}
         scope={inApplication ? undefined : <ChatScope applications={applications} value={chatAppId ?? ""} onChange={setVaultChatApp} />} />}
       <DocDrawer fileId={openDoc} onClose={() => setOpenDoc(null)}
                  onSaved={refresh} />

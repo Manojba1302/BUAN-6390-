@@ -109,6 +109,19 @@ class VaultChecklistTests(unittest.TestCase):
         self.assertEqual(reply.status_code, 409)
         self.assertIsNotNone(self.db.get(Application, self.app.application_id))
 
+    def test_an_application_a_lender_invited_them_to_is_not_deleted(self):
+        with patch("app.api.v1.lender_link.linked_lenders", return_value=[{"loan_id": str(uuid.uuid4()), "lender": "Lone Star Lending"}]):
+            reply = self.client.delete(f"/api/v1/applications/{self.app.application_id}")
+        self.assertEqual(reply.status_code, 409)
+        self.assertIn("Lone Star Lending", reply.json()["detail"])
+        self.assertIsNotNone(self.db.get(Application, self.app.application_id))
+
+    def test_applications_only_start_from_a_lender_invitation(self):
+        reply = self.client.post("/api/v1/applications")
+        self.assertEqual(reply.status_code, 403)
+        self.assertIn("invitation", reply.json()["detail"])
+        self.assertEqual(len(self.client.get("/api/v1/applications").json()), 1)
+
     def test_someone_else_cannot_delete_it(self):
         app.dependency_overrides[current_customer] = lambda: Customer(customer_id=uuid.uuid4())
         self.assertEqual(self.client.delete(f"/api/v1/applications/{self.app.application_id}").status_code, 404)

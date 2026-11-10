@@ -6,6 +6,8 @@ import type {
 
 export interface ChatReply {
   answer: string; document_links?: {file_id: string; original_name: string}[];
+  /** Something the borrower can do next, shown as a button under the answer. */
+  actions?: {kind: "upload"; label: string}[];
   citations: {file_id: string; page: number}[];
   evidence: {file_id: string; original_name: string; page: number}[];
 }
@@ -98,11 +100,14 @@ export const auth = {
   logout: () => request("/auth/logout", {method:"POST"}),
 };
 export const api = {
+  lenders: (app:string) => request<{loan_id:string;lender:string;stage:string}[]>("/applications/"+app+"/lenders"),
+  documentRequests:(app:string,loan:string)=>request<{request_id:string;title:string;status:string;reason:string|null;revision:number|null}[]>(`/applications/${app}/lenders/${loan}/requests`),
+  sendDocument: (app:string,loan:string,file:string,rid?:string) => request<{status:string}>(`/applications/${app}/lenders/${loan}/documents/${file}${rid?"?request_id="+encodeURIComponent(rid):""}`,{method:"POST"}),
+  lenderInvitation: (token:string, accept=false) => request<{lender:string; officer:string; application_id:string|null}>("/lender-invitations",{
+    method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token,accept})
+  }),
   dictionary: () => request<Dictionary>("/field-definitions"),
   checklist: () => request<ChecklistItem[]>("/checklist"),
-
-  createApplication: () =>
-    request<{ application_id: string }>("/applications", { method: "POST", headers: headers() }),
 
   listApplications: () =>
     request<{ application_id: string; status: string }[]>("/applications", { headers: headers() }),
@@ -153,6 +158,7 @@ export const api = {
     request<{ status: string; error: string | null }>(
       `/documents/${fileId}/status`, { headers: headers() }),
 
+  submittedContentUrl: (app: string, file: string) => `${BASE}/applications/${app}/submitted-documents/${file}`,
   contentUrl: (fileId: string) => `${BASE}/documents/${fileId}/content`,
 
   correct: (fileId: string, corrections: { extraction_id?: string; field_name?: string; value: string }[]) =>

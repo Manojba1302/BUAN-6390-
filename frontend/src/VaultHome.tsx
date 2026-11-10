@@ -1,5 +1,5 @@
 /** The vault: the first screen after sign-in. Personal storage first, applications when needed.
- *  Top to bottom: a dark welcome block (greeting, New application, your applications), then folders on
+ *  Top to bottom: a dark welcome block (greeting and your applications), then folders on
  *  the left and the chosen folder's documents in the centre, under a dark header with Upload documents,
  *  search and List / Cards. Uploads are read and filed on their own; they join a loan only when you say so. */
 import { useEffect, useRef, useState } from "react";
@@ -20,10 +20,8 @@ interface Props {
   firstName?: string;
   documents: DocumentSummary[];
   applications: ApplicationListItem[];
-  creating: boolean;
   onOpen: (fileId: string) => void;
   onChanged: () => void;
-  onCreateApplication: () => void;
   onContinue: (app: ApplicationListItem) => void;
 }
 
@@ -44,6 +42,12 @@ export function VaultHome(props: Props) {
 
   const reloadFolders = () => vault.folders().then(setFolders).catch(e => toast(e instanceof ApiError ? e.message : "Could not load your folders."));
   useEffect(() => { void reloadFolders(); }, [documents.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The chat's "Upload a document" button opens the same Add a document window, in the folder on screen.
+  useEffect(() => {
+    const open = () => setDialog({ kind: "upload", value: "other", folder });
+    window.addEventListener("homeflow:upload", open);
+    return () => window.removeEventListener("homeflow:upload", open);
+  }, [folder]);
   useLoanLists(applications, documents, setLists);
   const { asks, setAsks, upload, track, over, dropProps, fileInput } = useUploads(documents, applications, lists, onChanged);
 
@@ -63,8 +67,8 @@ export function VaultHome(props: Props) {
 
   return (
     <div className="vh vs">
-      <Welcome firstName={props.firstName} applications={applications} lists={lists} creating={props.creating}
-               onCreate={props.onCreateApplication} onContinue={props.onContinue} onDeleted={onChanged} />
+      <Welcome firstName={props.firstName} applications={applications} lists={lists}
+               onContinue={props.onContinue} onDeleted={onChanged} />
       <div className="vs-work">
         <FolderNav folders={folders} documents={documents} selected={folder} onSelect={pick} onOpen={onOpen}
                    onAdd={(value, f) => setDialog({ kind: "upload", value, folder: f })} onAddFolder={() => setAddingFolder(true)} onDeleteFolder={name => void deleteFolder(name)} />
@@ -241,7 +245,7 @@ function ReplaceDialog({ doc, onClose, onDone }: { doc: DocumentSummary; onClose
       <ul className="vh-replace-facts">
         <li>Version {doc.version ?? 1} is kept under its versions, and you can still open it.</li>
         <li>We read the new file again. Values you confirmed yourself in an application are kept.</li>
-        {apps.length > 0 && <li>{apps.map(a => reference(a.application_id)).join(", ")} will use the new version from now on{apps.some(a => a.status !== "draft") ? ", including the submitted application" : ""}.</li>}
+        {apps.length > 0 && <li>Draft applications use the replacement. Submitted applications keep their original version.</li>}
       </ul>
       <div className="vh-dialog-foot">
         <button type="button" className="btn sec" onClick={onClose} disabled={busy}>Cancel</button>

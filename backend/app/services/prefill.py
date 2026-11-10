@@ -17,7 +17,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import ApplicationField, Asset, Employment, Extraction, File
+from app.db.models import Application, ApplicationField, Asset, Employment, Extraction, File
 
 from app.services import attachments
 
@@ -48,12 +48,20 @@ REVIEW_FIELDS = NAME_FIELDS | ADDRESS_FIELDS
 NEVER_PREFILL = {"econsent"}  # declarations live in their own table and are never touched
 
 
+def _is_draft(db: Session, application_id: UUID) -> bool:
+    # Serialize proposal writes with submission, including calls from document corrections.
+    return db.scalar(select(Application.status).where(
+        Application.application_id == application_id).with_for_update()) == "draft"
+
+
 def apply_pending(db: Session, *, application_id: UUID) -> dict:
     """Fold in every processed document for this application.
 
     Safe to run on every load: applying the same extraction twice writes the
     same proposal, and a value the customer confirmed is skipped either way.
     """
+    if not _is_draft(db, application_id):
+        return {"applied": 0, "skipped": 0, "files": 0}
     _clear_unconfirmed_identity(db, application_id)
     files = db.scalars(select(File).where(
         attachments.attached_to(application_id), File.status == "completed")).all()
@@ -89,7 +97,7 @@ def apply_file(db: Session, *, file: File, application_id: UUID | None = None) -
     """Fold one processed file's extractions into an application (its latest one unless named)."""
     if application_id is not None:
         file = _InApplication(file, application_id)
-    if file.application_id is None:
+    if file.application_id is None or not _is_draft(db, file.application_id):
         return {"applied": 0, "skipped": 0}
 
     rows = db.scalars(select(Extraction).where(Extraction.file_id == file.file_id)).all()

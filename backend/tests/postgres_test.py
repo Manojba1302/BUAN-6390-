@@ -61,6 +61,21 @@ class DatabaseTests(unittest.TestCase):
         return self.db.get(ApplicationField, (self.app_row.application_id, name))
 
     # ---------------------------------------------------------------- pre-fill
+    def test_submitted_application_skips_prefill_and_repeat_submission(self):
+        row = self._file("drivers_license", date_of_birth="1990-01-01")
+        self.app_row.status = "submitted"
+        self.db.add(ApplicationField(application_id=self.app_row.application_id, field_name="firstName",
+                                     value="Archived", source="extracted", review_state="proposed"))
+        self.db.commit()
+        aid = self.app_row.application_id
+        self.assertEqual(prefill.apply_pending(self.db, application_id=aid)["applied"], 0)
+        self.assertEqual(prefill.apply_file(self.db, file=row)["applied"], 0)
+        self.db.rollback()
+        self.assertEqual(self.client.get(f"/api/v1/applications/{aid}").status_code, 200)
+        self.assertIsNone(self._field("dob"))
+        self.assertEqual(self._field("firstName").value, "Archived")
+        self.assertEqual(self.client.post(f"/api/v1/applications/{aid}/submit").status_code, 409)
+
     def test_prefill_proposes_values_with_evidence(self):
         self._file("drivers_license", full_name="Alex Morgan", date_of_birth="1990-01-01")
         self.assertEqual(prefill.apply_file(self.db, file=self.db.scalar(select(File).where(

@@ -1,4 +1,4 @@
-/** The vault page's pieces: the welcome block with New application and your applications, the folder
+/** The vault page's pieces: the welcome block with your lender applications, the folder
  *  list, and the documents list with its dark header, filters, review strip and one Actions menu per document. */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -45,8 +45,8 @@ const ART = (
 
 /* ------------------------------------------------------------ welcome block */
 interface WelcomeProps {
-  firstName?: string; applications: ApplicationListItem[]; lists: Record<string, ChecklistRow[]>; creating: boolean;
-  onCreate: () => void; onContinue: (app: ApplicationListItem) => void; onDeleted: () => void;
+  firstName?: string; applications: ApplicationListItem[]; lists: Record<string, ChecklistRow[]>;
+  onContinue: (app: ApplicationListItem) => void; onDeleted: () => void;
 }
 
 function greeting() {
@@ -54,8 +54,8 @@ function greeting() {
   return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
-/** The top of the vault: a greeting, New application beside it, and one small pill per application. */
-export function Welcome({ firstName, applications, lists, creating, onCreate, onContinue, onDeleted }: WelcomeProps) {
+/** The top of the vault: a greeting and one small pill per application. Applications start from a lender's invitation. */
+export function Welcome({ firstName, applications, lists, onContinue, onDeleted }: WelcomeProps) {
   const [deleting, setDeleting] = useState<ApplicationListItem | null>(null);
   return (
     <section className="vs-welcome" aria-labelledby="vs-hello">
@@ -63,10 +63,8 @@ export function Welcome({ firstName, applications, lists, creating, onCreate, on
         <p className="vs-ey">Your vault</p>
         <div className="vs-greet">
           <h1 id="vs-hello">{greeting()}{firstName ? `, ${firstName}` : ""}</h1>
-          <button type="button" className="vs-newapp" onClick={onCreate} disabled={creating}>
-            <span className="vs-newapp-ic"><Icon name="plus" /></span><span>{creating ? "Starting…" : "New application"}</span>
-          </button>
         </div>
+        {applications.length === 0 && <p className="vs-invite-note">Your loan officer will email you an invitation. Open it to start your application here.</p>}
         {applications.length > 0 && <div className="vs-apps">
           <h2 id="vs-apps-title">Your applications</h2>
           <ul className="vs-pills" aria-labelledby="vs-apps-title">
@@ -245,12 +243,11 @@ function ActionsMenu({ doc, applications, onMenu, onOpen, onChanged, onMove, onR
   }, [onMenu]);
   const act = (fn: () => void) => () => { onMenu(null); fn(); };
   async function attach(a: ApplicationListItem) {
-    try { await vault.attach(doc.file_id, a.application_id); toast(`${doc.original_name} added to ${purposeName(a.purpose)}. Your loan team can now see it.`, "ok"); onChanged(); }
+    try { await vault.attach(doc.file_id, a.application_id); toast(`${doc.original_name} added to ${purposeName(a.purpose)}. Use Send to loan team to share a copy.`, "ok"); onChanged(); }
     catch (e) { toast(e instanceof ApiError ? e.message : "Could not add this document."); }
   }
   async function remove() {
-    const apps = applicationsOf(doc);
-    if (!window.confirm(`Permanently delete "${doc.original_name}" from your vault? ${apps.length ? `It will also be removed from ${apps.length === 1 ? "its application" : `all ${apps.length} applications it is in`}, including sent ones. ` : ""}This cannot be undone.`)) return;
+    if (!window.confirm(`Permanently delete "${doc.original_name}" from your vault? Draft applications lose this file. Submitted copies are retained. This cannot be undone.`)) return;
     try { await api.deleteDocument(doc.file_id); toast("Document deleted.", "ok"); onChanged(); }
     catch (e) { toast(e instanceof ApiError ? e.message : "Could not delete this document."); }
   }
@@ -293,7 +290,7 @@ export function AskAttach({ asks, documents, applications, onDone, onChanged }: 
   if (!asks.length) return null;
   async function yes(ask: Ask, app: ApplicationListItem, doc: DocumentSummary) {
     setWorking(ask.fileId);
-    try { await vault.attach(ask.fileId, ask.applicationId); toast(`${doc.original_name} added to ${purposeName(app.purpose)}. Your loan team can now see it.`, "ok"); onDone(ask.fileId); onChanged(); }
+    try { await vault.attach(ask.fileId, ask.applicationId); toast(`${doc.original_name} added to ${purposeName(app.purpose)}. Use Send to loan team to share a copy.`, "ok"); onDone(ask.fileId); onChanged(); }
     catch (e) { toast(e instanceof ApiError ? e.message : "Could not add this document."); }
     finally { setWorking(""); }
   }

@@ -395,7 +395,7 @@ export function DocCard({ doc, onOpen, mode, applicationId, onChanged }: {
   async function act(action: "remove" | "delete" | "link") {
     const message = action === "remove"
       ? `Remove "${doc.original_name}" from this application? It stays in My Vault. Unconfirmed pre-filled values from this file will be removed.`
-      : `Permanently delete "${doc.original_name}" from My Vault? ${apps.length ? `It will also be removed from ${apps.length === 1 ? "its application" : `all ${apps.length} applications it is in`}, including submitted ones. ` : ""}The file, extracted data and document index will be deleted. This cannot be undone.`;
+      : `Permanently delete "${doc.original_name}" from My Vault? Draft applications lose this file. Submitted copies are retained. This cannot be undone.`;
     if (action !== "link" && !window.confirm(message)) return;
     setWorking(true);
     try {
