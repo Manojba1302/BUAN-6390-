@@ -11,6 +11,7 @@ field blank:
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
@@ -67,7 +68,7 @@ def apply_pending(db: Session, *, application_id: UUID) -> dict:
         attachments.attached_to(application_id), File.status == "completed")).all()
     totals = {"applied": 0, "skipped": 0, "files": len(files)}
     for file in files:
-        result = apply_file(db, file=file, application_id=application_id)
+        result = apply_file(db, file=file, application_id=application_id, commit=False)
         totals["applied"] += result["applied"]
         totals["skipped"] += result["skipped"]
     return totals
@@ -81,7 +82,7 @@ def _clear_unconfirmed_identity(db: Session, application_id: UUID) -> None:
         ApplicationField.review_state == "proposed")).all()
     for row in rows:
         db.delete(row)
-    db.commit()
+    db.flush()
 
 
 class _InApplication:
@@ -93,7 +94,7 @@ class _InApplication:
         return getattr(self._file, name)
 
 
-def apply_file(db: Session, *, file: File, application_id: UUID | None = None) -> dict:
+def apply_file(db: Session, *, file: File, application_id: UUID | None = None, commit: bool = True) -> dict:
     """Fold one processed file's extractions into an application (its latest one unless named)."""
     if application_id is not None:
         file = _InApplication(file, application_id)
@@ -107,7 +108,10 @@ def apply_file(db: Session, *, file: File, application_id: UUID | None = None) -
         _apply_employment(db, file, values)
     if file.document_tag == "bank_statement":
         _apply_asset(db, file, values)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {"applied": applied, "skipped": skipped}
 
 
@@ -229,7 +233,7 @@ def _apply_asset(db: Session, file: File, values: dict[str, Extraction]) -> None
         Asset.institution == institution,
         Asset.account_mask == mask))
     balance = _decimal(_get(values, "ending_balance"))
-    period_end = _get(values, "period_end")
+    period_end = _statement_date(_get(values, "period_end"))
     if row is None:
         db.add(Asset(application_id=file.application_id, asset_type="Checking Account",
                      institution=institution, account_mask=mask, balance=balance or 0,
@@ -238,9 +242,20 @@ def _apply_asset(db: Session, file: File, values: dict[str, Extraction]) -> None
         _update_balance(row, file, balance, period_end)
 
 
-def _update_balance(row: Asset, file: File, balance: Decimal | None, period_end: str | None) -> None:
+def _statement_date(value) -> date | None:
+    if isinstance(value, date):
+        return value
+    for pattern in ("%Y-%m-%d", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(str(value).strip(), pattern).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _update_balance(row: Asset, file: File, balance: Decimal | None, period_end: date | None) -> None:
     """Same account, another month. Keep the most recent balance, never add them."""
-    if balance is not None and (row.as_of is None or (period_end or "") >= str(row.as_of)):
+    if balance is not None and (row.as_of is None or (period_end is not None and period_end >= row.as_of)):
         row.balance = balance
         row.as_of = period_end or row.as_of
         row.source_file_id = file.file_id

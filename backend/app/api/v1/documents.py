@@ -1,10 +1,12 @@
 """Documents: the classify pre-check, the upload, the vault and corrections."""
 from __future__ import annotations
 
+from collections import defaultdict
 import logging
 import uuid
 from pathlib import Path
 from uuid import UUID
+from urllib.parse import quote
 
 import money_values
 import doc_types
@@ -22,7 +24,7 @@ from app.db.models import (
 )
 from app.db.models import SubmissionRecord
 from app.db.session import get_db
-from app.services import attachments, audit, classifier, queue, storage, saved_document_evidence, vault_folders, versions
+from app.services import storage_cleanup, attachments, audit, classifier, queue, storage, saved_document_evidence, vault_folders, versions
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -43,7 +45,7 @@ def _check_upload(upload: UploadFile, body: bytes, document_tag: str) -> None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown document type: {document_tag}")
     if len(body) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"Files must be under {settings.max_upload_mb} MB")
-    if upload.content_type and upload.content_type not in settings.allowed_types:
+    if upload.content_type not in settings.allowed_types:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                             "Upload a PDF, JPG, PNG or HEIC")
 
@@ -119,6 +121,7 @@ def _store_file(db: Session, customer: Customer, upload: UploadFile, body: bytes
         storage_key="", logical_path=logical_path or "/", status="queued",
     )
     row.storage_key = storage.storage_key(row.file_id, row.original_name)
+    storage_cleanup.reserve_upload(db, row)
     storage.put_object(row.storage_key, body, upload.content_type)
     db.add(row)
     return row
@@ -155,7 +158,7 @@ def list_documents(application_id: UUID | None = None, document_tag: str | None 
     if document_tag:
         stmt = stmt.where(File.document_tag == document_tag)
     rows = db.scalars(stmt.order_by(File.uploaded_at.desc())).all()
-    return [_summary(db, r) for r in rows]
+    return _summaries(db, rows)
 
 
 class FolderIn(BaseModel):
@@ -235,7 +238,7 @@ def content(file_id: UUID, db: Session = Depends(get_db),
     row = _owned_file(db, file_id, customer)
     return Response(content=storage.get_object(row.storage_key),
                     media_type=row.content_type or "application/octet-stream",
-                    headers={"Content-Disposition": f'inline; filename="{row.original_name}"'})
+                    headers={"Content-Disposition": "inline; filename*=UTF-8''" + quote(row.original_name, safe="")})
 
 
 @router.get("/{file_id}/status")
@@ -243,7 +246,7 @@ def document_status(file_id: UUID, db: Session = Depends(get_db),
                     customer: Customer = Depends(current_customer)) -> dict:
     row = _owned_file(db, file_id, customer)
     cls = db.get(FileClassification, file_id)
-    return {"file_id": str(file_id), "status": row.status, "error": row.error_detail,
+    return {"file_id": str(file_id), "status": row.status, "error": "Document processing failed. Please retry." if row.error_detail else None,
             "classification": _classification(cls)}
 
 
@@ -264,10 +267,11 @@ def correct(file_id: UUID, batch: CorrectionBatch, db: Session = Depends(get_db)
     audit.record(db, action="extraction.corrected", customer_id=customer.customer_id,
                  application_id=row.application_id, file_id=file_id,
                  payload={"count": changed})
+    db.flush()
+    from app.services import prefill
+    for application in attachments.applications_of(db, row.file_id):
+        prefill.apply_file(db, file=row, application_id=application.application_id, commit=False)
     db.commit()
-
-    from app.services import prefill          # local import avoids a cycle
-    prefill.apply_file(db, file=row)
     return {"corrected": changed}
 
 
@@ -394,8 +398,8 @@ def change_type(file_id: UUID, body: TypeIn, db: Session = Depends(get_db),
     audit.record(db, action="document.retyped", customer_id=customer.customer_id, application_id=row.application_id,
                  file_id=file_id, payload={"document_tag": body.document_tag, "label": body.label})
     db.commit()
-    if attached:
-        _after_attach(db, row, attached[-1])
+    for application_id in attached:
+        _after_attach(db, row, application_id)
     return _summary(db, row)
 
 
@@ -422,6 +426,7 @@ def delete_permanently(file_id: UUID, db: Session = Depends(get_db),
     for version in reversed(every):
         _delete_one(db, version, customer)
     db.commit()
+    storage_cleanup.drain(db.get_bind())
     return Response(status_code=204)
 
 
@@ -434,8 +439,7 @@ def _delete_one(db: Session, row: File, customer: Customer) -> None:
             continue
         _clear_proposals(db, row, app.application_id)
     _detach_confirmed_values(db, row.file_id)
-    _delete_markdown(db, row.file_id)
-    storage.delete_object(row.storage_key)
+    storage_cleanup.schedule_delete(db, row)
     audit.record(db, action="document.deleted", customer_id=customer.customer_id,
                  application_id=row.application_id, file_id=row.file_id)
     db.delete(row)  # PostgreSQL cascades classification, extraction, markdown, vectors and links.
@@ -505,18 +509,6 @@ def _detach_confirmed_values(db: Session, file_id: UUID) -> None:
         field.method = None
 
 
-def _delete_markdown(db: Session, file_id: UUID) -> None:
-    (Path(settings.markdown_dir) / f"{file_id}.pages.json").unlink(missing_ok=True)   # text kept for extraction
-    md = db.get(DocumentMarkdown, file_id)
-    if not md:
-        return
-    directory = Path(settings.markdown_dir).resolve()
-    path = Path(md.markdown_path).resolve()
-    if path.parent != directory or path.name != f"{file_id}.md":
-        raise HTTPException(500, "Document storage path is invalid.")
-    path.unlink(missing_ok=True)
-
-
 def _owned_file(db: Session, file_id: UUID, customer: Customer) -> File:
     row = db.get(File, file_id)
     if row is None or row.customer_id != customer.customer_id:
@@ -533,10 +525,41 @@ def _classification(cls: FileClassification | None) -> dict | None:
 
 
 def _summary(db: Session, row: File) -> dict:
-    cls = db.get(FileClassification, row.file_id)
-    md = db.get(DocumentMarkdown, row.file_id)
-    found = [{"field_name": e.field_name, "value": e.corrected_value or e.value_normalized or e.value_raw}
-             for e in db.scalars(select(Extraction).where(Extraction.file_id == row.file_id))]
+    return _summaries(db, [row])[0]
+
+
+def _summaries(db, rows):
+    if not rows:
+        return []
+    ids = [r.file_id for r in rows]
+    cls = {c.file_id: c for c in db.scalars(select(FileClassification).where(FileClassification.file_id.in_(ids)))}
+    found = defaultdict(list)
+    for e in db.scalars(select(Extraction).where(Extraction.file_id.in_(ids))):
+        found[e.file_id].append({"field_name": e.field_name, "value": e.corrected_value or e.value_normalized or e.value_raw})
+    apps = defaultdict(list)
+    for fid, aid, status in db.execute(text("SELECT d.file_id,a.application_id,a.status FROM application_document d JOIN application a USING(application_id) WHERE d.file_id=ANY(:ids) ORDER BY d.attached_at"), {"ids": ids}):
+        apps[fid].append({"application_id": str(aid), "status": status})
+    meta = {r.file_id: r for r in db.execute(text(SUMMARY_METADATA), {"ids": ids})}
+    return [_format_summary(r, cls.get(r.file_id), found[r.file_id], apps[r.file_id], meta[r.file_id]) for r in rows]
+
+
+SUMMARY_METADATA = """
+WITH RECURSIVE chain(root, id, depth) AS (
+    SELECT file_id, file_id, 1 FROM file WHERE file_id=ANY(:ids)
+    UNION ALL SELECT c.root, v.previous_file_id, c.depth+1 FROM chain c
+        JOIN document_version v ON v.file_id=c.id WHERE v.previous_file_id IS NOT NULL
+), depth AS (SELECT root, max(depth) AS version FROM chain GROUP BY root),
+chunks AS (SELECT file_id, bool_or(embedding IS NULL) AS incomplete FROM document_chunk
+    WHERE file_id=ANY(:ids) GROUP BY file_id)
+SELECT d.root AS file_id, d.version, l.label, m.file_id IS NOT NULL AS has_md,
+    coalesce(c.incomplete,m.file_id IS NOT NULL) AS unindexed FROM depth d
+    LEFT JOIN vault_document_label l ON l.file_id=d.root
+    LEFT JOIN document_markdown m ON m.file_id=d.root LEFT JOIN chunks c ON c.file_id=d.root
+"""
+
+
+def _format_summary(row, cls, found, apps, meta):
+    label, has_md, unindexed, version = meta.label, meta.has_md, meta.unindexed, meta.version
     missing = _missing_fields(row.document_tag, found) if row.application_id else []   # fields come at attach
     return {
         "extracted_field_count": sum(bool(e["value"]) for e in found),
@@ -545,13 +568,13 @@ def _summary(db: Session, row: File) -> dict:
         "display_name": doc_types.display_name(row.document_tag),
         "original_name": row.original_name, "content_type": row.content_type,
         "size_bytes": row.size_bytes, "page_count": row.page_count, "logical_path": row.logical_path, "status": row.status,
-        "folder": vault_folders.folder_of(row.logical_path, row.document_tag), "error": row.error_detail, "label": vault_folders.label_of(db, row.file_id),
+        "folder": vault_folders.folder_of(row.logical_path, row.document_tag), "error": "Document processing failed. Please retry." if row.error_detail else None, "label": label,
         "application_id": str(row.application_id) if row.application_id else None,
-        "application_status": (db.get(Application, row.application_id).status if row.application_id and db.get(Application, row.application_id) else None),
-        "applications": [{"application_id": str(a.application_id), "status": a.status} for a in attachments.applications_of(db, row.file_id)],
+        "application_status": next((a["status"] for a in apps if a["application_id"] == str(row.application_id)), None),
+        "applications": apps,
         "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
-        "classification": _classification(cls), "has_markdown": md is not None, "searchable": not _unindexed(db, row),
-        "version": versions.number(db, row.file_id),
+        "classification": _classification(cls), "has_markdown": has_md, "searchable": not (row.status == "completed" and unindexed),
+        "version": version,
     }
 
 

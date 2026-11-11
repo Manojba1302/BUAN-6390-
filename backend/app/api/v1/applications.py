@@ -93,9 +93,6 @@ def get_application(application_id: UUID, db: Session = Depends(get_db),
     frozen = db.get(SubmissionRecord, application_id) if app.status == "submitted" else None
     if frozen:
         return frozen.state
-    if app.status == "draft" and _account_defaults(db, app, customer):
-        db.commit()
-    prefill_service.apply_pending(db, application_id=app.application_id)
     return _serialise(db, app)
 
 
@@ -142,7 +139,6 @@ def patch_application(application_id: UUID, patch: ApplicationPatch,
         app.current_step = patch.current_step
     if "loanPurpose" in patch.fields:
         app.loan_purpose = patch.fields["loanPurpose"]
-
     db.commit()
     return _serialise(db, app)
 
@@ -215,8 +211,13 @@ def _serialise_fields(db: Session, app: Application) -> dict:
             "page": f.page,
             "evidence_quote": f.evidence_quote,
             "method": f.method,
-        } for f in fields
+        } for f in fields if not _obsolete_proposal(app, f)
     }
+
+
+def _obsolete_proposal(app, field):
+    return (app.status == "draft" and field.source == "extracted" and field.review_state == "proposed"
+            and field.field_name in prefill_service.REVIEW_FIELDS)
 
 
 def _row(obj) -> dict:
@@ -367,7 +368,6 @@ def prefill(application_id: UUID, db: Session = Depends(get_db),
             customer: Customer = Depends(current_customer)) -> dict:
     """Values a document proposed and the customer has not yet confirmed."""
     app = _owned(db, application_id, customer)
-    prefill_service.apply_pending(db, application_id=app.application_id)
     rows = db.scalars(select(ApplicationField).where(
         ApplicationField.application_id == app.application_id,
         ApplicationField.review_state == "proposed")).all()
@@ -376,7 +376,7 @@ def prefill(application_id: UUID, db: Session = Depends(get_db),
             "field_name": r.field_name, "value": r.value,
             "file_id": str(r.file_id) if r.file_id else None,
             "page": r.page, "evidence_quote": r.evidence_quote, "method": r.method,
-        } for r in rows]
+        } for r in rows if not _obsolete_proposal(app, r)]
     }
 
 
@@ -390,22 +390,41 @@ def submit(application_id: UUID, db: Session = Depends(get_db),
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
     if app.status != "draft":
         raise HTTPException(status.HTTP_409_CONFLICT, "Only a draft application can be submitted.")
+    prefill_service.apply_pending(db, application_id=application_id)
+    state = _ready_for_submission(application_id, db, customer)
+    _freeze_submission(db, app, customer, state)
+    app.submitted_at = datetime.now(timezone.utc)
+    audit.record(db, action="application.submitted", customer_id=customer.customer_id, application_id=application_id)
+    db.commit()
+    return {"application_id": str(application_id), "status": app.status, "reference": f"HF-{application_id.hex[:8].upper()}"}
+
+
+def _ready_for_submission(application_id, db, customer):
     state = progress(application_id, db, customer)
     if not state["complete"]:
         blocking = [m for s in state["steps"] for m in s["missing"]]
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                             {"message": "Some answers are still missing", "missing": blocking})
 
-    from app.api.v1.documents import _summary
+    return state
+
+
+def _freeze_submission(db, app, customer, state):
+    application_id = app.application_id
+    from app.api.v1.documents import _summaries
     files = db.scalars(select(File).where(attachments.attached_to(application_id))
                        .order_by(File.uploaded_at.desc(), File.file_id)).all()
-    summaries = [dict(_summary(db, row), submitted_copy=True, application_id=str(application_id),
-                      application_status="submitted") for row in files]
+    summaries = [dict(summary, submitted_copy=True, application_id=str(application_id),
+                      application_status="submitted") for summary in _summaries(db, files)]
     checks = checklist(application_id, db, customer)
     app.status = "submitted"
     db.add(SubmissionRecord(application_id=application_id, state=jsonable_encoder(_serialise(db, app)),
                             progress={**state, "status": "submitted"}, checklist=checks, documents=summaries))
     db.flush()
+    _freeze_files(db, application_id, files)
+
+
+def _freeze_files(db, application_id, files):
     for row in files:
         body = storage.get_object(row.storage_key)
         if row.checksum and storage.checksum(body) != row.checksum:
@@ -414,12 +433,6 @@ def submit(application_id: UUID, db: Session = Depends(get_db),
                               family_id=versions.chain(db, row.file_id)[0].file_id,
                               original_name=row.original_name, body=body))
         db.flush()
-    app.submitted_at = datetime.now(timezone.utc)
-    audit.record(db, action="application.submitted",
-                 customer_id=customer.customer_id, application_id=app.application_id)
-    db.commit()
-    return {"application_id": str(app.application_id), "status": app.status,
-            "reference": f"HF-{app.application_id.hex[:8].upper()}"}   # the same reference the customer sees everywhere else
 
 
 @router.get("/{application_id}/submitted-documents/{file_id}")

@@ -66,11 +66,21 @@ class ChatHistoryTests(unittest.TestCase):
     def test_failed_request_is_saved_and_does_not_block_retry(self):
         file = self._file("drivers_license", full_name="Example", expiry_date="2027-01-01")
         route = self.conversation()
-        with patch.object(chat.chat_evidence, "retrieve", return_value=[{"file_id":str(file.file_id),"page":1,"content":"conditions","original_name":"license.pdf"}]), patch.object(chat.ollama, "embed", return_value=[0.1]*768), patch.object(chat.ollama, "generate_json", side_effect=chat.ollama.OllamaError("down")):
+        with patch("app.api.v1.conversations._generate", side_effect=RuntimeError("provider unavailable")):
             response = self.client.post(route + "/messages", json={"question": "Explain the printed conditions"})
         self.assertEqual(response.status_code, 503)
         self.assertEqual(self.client.get(route).json()["turns"][0]["status"], "failed")
         self.send(route, "When does my license expire?")
+
+    def test_unexpected_stream_failure_releases_conversation(self):
+        self._file("drivers_license", full_name="Example", expiry_date="2027-01-01")
+        route = self.conversation()
+        with patch("app.api.v1.conversations._generate", side_effect=RuntimeError("private provider details")):
+            response = self.client.post(route+"/messages/stream",json={"question":"Read the file"})
+        self.assertIn("event: error", response.text)
+        self.assertNotIn("private provider details", response.text)
+        self.assertEqual(self.client.get(route).json()["turns"][0]["status"],"failed")
+        self.send(route,"When does my license expire?")
 
     def test_other_customer_cannot_read_send_or_delete_history(self):
         from app.core.security import current_customer

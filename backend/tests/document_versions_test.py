@@ -61,6 +61,45 @@ class DocumentVersionTests(unittest.TestCase):
     def _vault(self):
         return [d["file_id"] for d in self.client.get("/api/v1/documents").json()]
 
+    def test_failed_upload_is_reclaimed_without_publishing_a_file(self):
+        from app.services import storage_cleanup
+        from app.db.models import StorageCleanup
+        from datetime import datetime, timezone
+        body = self._pdf()
+        with patch.object(documents.audit, "record", side_effect=RuntimeError("injected write failure")):
+            with self.assertRaises(RuntimeError):
+                self.client.post("/api/v1/documents", data={"document_tag": "w2"}, files={"file": body})
+        self.assertEqual(self._vault(), [])
+        key, = self.blobs
+        with SessionLocal.begin() as db:
+            db.query(StorageCleanup).filter_by(storage_key=key).one().retry_at = datetime.now(timezone.utc)
+        storage_cleanup.drain(self.db.get_bind())
+        self.assertNotIn(key, self.blobs)
+
+    def test_failed_delete_commit_preserves_source(self):
+        fid = self._upload()
+        with patch("sqlalchemy.orm.Session.commit", side_effect=RuntimeError("injected commit failure")):
+            with self.assertRaises(RuntimeError):
+                self.client.delete(f"/api/v1/documents/{fid}/permanent")
+        self.assertEqual(self._vault(), [fid])
+        self.assertEqual(self.client.get(f"/api/v1/documents/{fid}/content").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/v1/documents/{fid}/permanent").status_code, 204)
+        self.assertFalse(self.blobs)
+
+    def test_filename_and_folder_count_after_replacement(self):
+        from urllib.parse import quote
+        name = 'tax-"\u6587\u4ef6".pdf'
+        fid = self._upload()
+        with SessionLocal.begin() as db:
+            db.get(File, uuid.UUID(fid)).original_name = name
+        response = self.client.get(f"/api/v1/documents/{fid}/content")
+        self.assertEqual(response.status_code,200)
+        self.assertTrue(response.headers["Content-Disposition"].endswith(quote(name,safe="")))
+        self._read(fid)
+        self.assertEqual(self._replace(fid).status_code,201)
+        folders = self.client.get("/api/v1/documents/folders").json()
+        self.assertEqual(next(f["count"] for f in folders if f["name"]=="Taxes"),1)
+
     def test_replacing_keeps_the_old_version_and_shows_the_new_one(self):
         old = self._upload()
         sent = self._replace(old)

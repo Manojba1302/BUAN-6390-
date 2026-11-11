@@ -61,6 +61,50 @@ class DatabaseTests(unittest.TestCase):
         return self.db.get(ApplicationField, (self.app_row.application_id, name))
 
     # ---------------------------------------------------------------- pre-fill
+    def test_snapshot_storage_uses_configured_key(self):
+        import field_crypto
+        from cryptography.fernet import Fernet
+        from app.db.models import SubmissionRecord
+        aid = self.app_row.application_id
+        state = {"fields": {"dob": {"value": "1990-01-01"}}}
+        try:
+            with patch.dict(os.environ, FIELD_ENCRYPTION_KEY=Fernet.generate_key().decode()):
+                field_crypto._cipher.cache_clear()
+                self.db.add(SubmissionRecord(application_id=aid, state=state, progress={}, checklist=[], documents=[]))
+                self.db.flush()
+                raw = self.db.scalar(text("SELECT state::text FROM submission_record WHERE application_id=:id"), {"id": aid})
+                self.assertNotIn("1990-01-01", raw)
+                self.assertIn("encrypted_snapshot_v1", raw)
+                self.db.expire_all()
+                self.assertEqual(self.db.get(SubmissionRecord, aid).state, state)
+        finally:
+            self.db.rollback()
+            field_crypto._cipher.cache_clear()
+
+    def test_legacy_archive_backfill_is_idempotent(self):
+        import field_crypto
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        from cryptography.fernet import Fernet
+        from app.db.archive import protect_existing
+        conn = self.db.connection()
+        conn.execute(text("CREATE TEMP TABLE submission_record (LIKE public.submission_record) ON COMMIT DROP"))
+        conn.execute(text("""INSERT INTO submission_record VALUES (:id,'{"fields":{"dob":"1990-01-01"}}','{}','[]','[]')"""),
+                     {"id":uuid.uuid4()})
+        try:
+            with patch.dict(os.environ, FIELD_ENCRYPTION_KEY=Fernet.generate_key().decode()):
+                field_crypto._cipher.cache_clear()
+                engine = SimpleNamespace(begin=lambda: nullcontext(conn))
+                protect_existing(engine)
+                first = conn.scalar(text("SELECT state::text FROM submission_record"))
+                protect_existing(engine)
+                self.assertEqual(conn.scalar(text("SELECT state::text FROM submission_record")), first)
+                self.assertIn("encrypted_snapshot_v1",first)
+                self.assertNotIn("1990-01-01",first)
+        finally:
+            self.db.rollback()
+            field_crypto._cipher.cache_clear()
+
     def test_submitted_application_skips_prefill_and_repeat_submission(self):
         row = self._file("drivers_license", date_of_birth="1990-01-01")
         self.app_row.status = "submitted"
@@ -105,7 +149,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertIsNone(job)
 
     def test_two_statements_for_one_account_are_one_asset_with_latest_balance(self):
-        for end, bal in (("2026-08-31", "1000"), ("2026-09-30", "2500"), ("2026-07-31", "50")):
+        for end, bal in (("2026-08-31", "1000"), ("09/30/2026", "2500"), ("2026-07-31", "50")):
             prefill.apply_file(self.db, file=self._file("bank_statement", institution="First Bank",
                                                         account_mask="****1234", ending_balance=bal, period_end=end))
         assets = self.db.scalars(select(Asset).where(Asset.application_id == self.app_row.application_id)).all()
@@ -114,7 +158,15 @@ class DatabaseTests(unittest.TestCase):
 
     # ---------------------------------------------------------------- application API
     def test_get_application_serialises_fields_and_lists(self):
-        self._file("drivers_license", date_of_birth="1990-01-01")
+        row = self._file("drivers_license", date_of_birth="1990-01-01")
+        from app.services import prefill_jobs
+        with self.db.begin():
+            row.status = "processing"
+            self.db.flush()
+            row.status = "completed"
+        for _ in range(50):
+            if not prefill_jobs.run_one(self.db.get_bind()):
+                break
         body = self.client.get(f"/api/v1/applications/{self.app_row.application_id}").json()
         self.assertEqual(body["fields"]["dob"]["value"], "1990-01-01")
         self.assertEqual(body["fields"]["dob"]["review_state"], "proposed")

@@ -70,6 +70,10 @@ def send(conversation_id: UUID, body: Message, db: Session = Depends(get_db), cu
     except HTTPException as exc:
         chat_history.finish(db, customer, turn_id, error=str(exc.detail))
         raise
+    except Exception:
+        db.rollback()
+        chat_history.finish(db, customer, turn_id, error="We could not answer that. Please try again.")
+        raise HTTPException(503, "We could not answer that. Please try again.")
     return chat_history.serialise(db, customer, conversation, db.get(type(row), turn_id))
 
 
@@ -105,7 +109,11 @@ def _stream_worker(events, conversation_id, customer_id, turn_id, body):
             chat_history.finish(db, customer, turn_id, error=str(exc.detail))
         events.put(("done", chat_history.serialise(db, customer, conversation, db.get(ChatTurn, turn_id))))
     except Exception:
-        events.put(("error", {"detail": "We could not answer that. Please try again."}))
+        db.rollback()
+        try:
+            chat_history.finish(db, customer, turn_id, error="We could not answer that. Please try again.")
+        finally:
+            events.put(("error", {"detail": "We could not answer that. Please try again."}))
     finally:
         streaming.SINK.reset(sink)
         db.close()

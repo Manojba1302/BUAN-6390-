@@ -216,7 +216,7 @@ def on_message(channel, method, _properties, body) -> None:
         log.exception("job failed: %s", exc)
         try:
             with db.session() as conn:
-                db.set_status(conn, job.get("file_id"), "failed", error=str(exc)[:500])
+                db.set_status(conn, job.get("file_id"), "failed", error="Document processing failed. Please retry.")
         except Exception:
             log.exception("could not record the failure")
         channel.basic_ack(method.delivery_tag)     # the row says failed; no poison loop

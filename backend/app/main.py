@@ -34,6 +34,24 @@ for router in (lender_link.router, auth.router, google_auth.router, health.route
 
 @app.on_event("startup")
 def on_startup() -> None:
+    _initialize_database()
+    from app.services import prefill_jobs
+    from app.db.session import engine
+    app.state.prefill_stop = prefill_jobs.start(engine)
+    try:
+        storage.ensure_bucket()
+    except Exception as exc:                 # storage down should not stop the API
+        log.warning("object storage not ready: %s", exc)
+    log.info("%s listening, api at %s", settings.app_name, settings.api_prefix)
+
+
+@app.on_event("shutdown")
+def stop_cleanup():
+    app.state.cleanup_stop.set()
+    app.state.prefill_stop.set()
+
+
+def _initialize_database():
     from app.db.models import AuthAccount, AuthSession, PasswordReset, GoogleIdentity, GoogleChallenge
     from app.db.session import engine
     for table in (AuthAccount.__table__, AuthSession.__table__, PasswordReset.__table__, GoogleIdentity.__table__, GoogleChallenge.__table__):
@@ -43,16 +61,17 @@ def on_startup() -> None:
     from app.db.models import SubmissionRecord, SubmissionFile
     SubmissionRecord.__table__.create(engine, checkfirst=True)
     SubmissionFile.__table__.create(engine, checkfirst=True)
+    from app.db.models import StorageCleanup
+    from app.services import storage_cleanup
+    StorageCleanup.__table__.create(engine, checkfirst=True)
+    app.state.cleanup_stop = storage_cleanup.start(engine)
+    from app.db.archive import protect_existing
+    protect_existing(engine)
     attachments.ensure(engine)               # one document in several applications
     from app.services import versions
     versions.ensure(engine)                  # replace keeps earlier versions
     from app.services import chat_history
     chat_history.ensure(engine)              # a vault chat needs no application
-    try:
-        storage.ensure_bucket()
-    except Exception as exc:                 # storage down should not stop the API
-        log.warning("object storage not ready: %s", exc)
-    log.info("%s listening, api at %s", settings.app_name, settings.api_prefix)
 
 
 def _fix_checklist_spelling(engine) -> None:

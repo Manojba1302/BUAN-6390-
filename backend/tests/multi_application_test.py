@@ -93,6 +93,18 @@ class MultiApplicationTests(unittest.TestCase):
                 field = s.get(ApplicationField, (application.application_id, "dob"))
                 self.assertEqual((field.value, str(field.file_id)), ("1990-02-03", file_id))
 
+    def test_correction_prefills_each_draft_without_an_application_read(self):
+        file_id = self._license()
+        for application in (self.a, self.b):
+            self.assertEqual(self._attach(file_id, application)[0].status_code, 200)
+        extraction = self.db.query(Extraction).filter_by(file_id=uuid.UUID(file_id), field_name="date_of_birth").one()
+        result = self.client.patch(f"/api/v1/documents/{file_id}/extractions", json={
+            "corrections":[{"extraction_id":str(extraction.extraction_id),"value":"1995-10-22"}]})
+        self.assertEqual(result.status_code, 200)
+        with SessionLocal() as db:
+            for application in (self.a, self.b):
+                self.assertEqual(db.get(ApplicationField,(application.application_id,"dob")).value,"1995-10-22")
+
     def test_removing_from_one_application_keeps_it_in_the_other(self):
         file_id = self._license()
         self._attach(file_id, self.a); self._attach(file_id, self.b)

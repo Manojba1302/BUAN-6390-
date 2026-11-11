@@ -43,13 +43,23 @@ class Application(Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+from app.db.archive import ArchiveJSON
+
+
 class SubmissionRecord(Base):
     __tablename__ = "submission_record"
     application_id: Mapped[UUID] = mapped_column(ForeignKey("application.application_id", ondelete="CASCADE"), primary_key=True)
-    state: Mapped[dict] = mapped_column(JSONB)
-    progress: Mapped[dict] = mapped_column(JSONB)
-    checklist: Mapped[list] = mapped_column(JSONB)
-    documents: Mapped[list] = mapped_column(JSONB)
+    state: Mapped[dict] = mapped_column(ArchiveJSON())
+    progress: Mapped[dict] = mapped_column(ArchiveJSON())
+    checklist: Mapped[list] = mapped_column(ArchiveJSON())
+    documents: Mapped[list] = mapped_column(ArchiveJSON())
+
+
+class StorageCleanup(Base):
+    __tablename__ = "storage_cleanup"
+    file_id: Mapped[UUID] = mapped_column(PgUUID, primary_key=True)
+    storage_key: Mapped[str] = mapped_column(Text)
+    retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class SubmissionFile(Base):

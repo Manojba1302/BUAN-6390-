@@ -3,6 +3,7 @@ import os
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 from sqlalchemy import select, text
 from fastapi.testclient import TestClient
 from app.main import app
@@ -42,7 +43,8 @@ class DocumentLifecycleTests(unittest.TestCase):
                 self.assertIsNone(db.scalar(select(Asset).where(Asset.source_file_id==file_id)))
             self.assertEqual(storage.get_object(key), b"synthetic test document")
             self.assertTrue(md.exists())
-            self.assertEqual(client.post(f"/api/v1/documents/{file_id}/link", json={"application_id":str(application_id)}).status_code, 200)
+            with patch("app.api.v1.documents.queue.publish_extraction_job"):
+                self.assertEqual(client.post(f"/api/v1/documents/{file_id}/link", json={"application_id":str(application_id)}).status_code, 200)
             with SessionLocal() as db:
                 self.assertIsNone(db.get(ApplicationField,(application_id,"city")))
                 db.get(Application,application_id).status="submitted"; db.commit()
@@ -53,7 +55,12 @@ class DocumentLifecycleTests(unittest.TestCase):
             with SessionLocal() as db:
                 db.get(File,file_id).status="completed"
                 db.get(Application,application_id).status="submitted"; db.commit()
-            self.assertEqual(client.delete(f"/api/v1/documents/{file_id}/permanent").status_code,204)
+            self.assertEqual(client.delete(f"/api/v1/documents/{file_id}/permanent").status_code,409)
+            self.assertEqual(storage.get_object(key), b"synthetic test document")
+            with SessionLocal() as db:
+                db.get(Application,application_id).status="draft"; db.commit()
+            result = client.delete(f"/api/v1/documents/{file_id}/permanent")
+            self.assertEqual(result.status_code,204,result.text)
             with SessionLocal() as db:
                 self.assertIsNone(db.get(File,file_id))
                 self.assertIsNone(db.scalar(select(Extraction).where(Extraction.file_id==file_id)))

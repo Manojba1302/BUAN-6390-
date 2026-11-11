@@ -74,6 +74,7 @@ def profile(customer):
 
 def establish(db, response, customer):
     token = secrets.token_urlsafe(32)
+    db.execute(delete(AuthSession).where(AuthSession.expires_at <= datetime.now(timezone.utc)))
     db.add(AuthSession(token_hash=digest(token), customer_id=customer.customer_id,
                        expires_at=datetime.now(timezone.utc) + timedelta(hours=8)))
     db.commit()

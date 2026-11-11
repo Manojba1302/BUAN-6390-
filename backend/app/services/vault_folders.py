@@ -12,6 +12,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.db.models import File
+from app.services.versions import current_only
 
 DEFAULT_FOLDERS = ("Legal", "Identification & Licenses", "People & Places", "Finances",
                    "Taxes", "Insurance & Property", "Other")
@@ -46,7 +47,7 @@ def resolve(db, customer_id, name: str) -> str | None:
 
 def listing(db, customer_id) -> list[dict]:
     """Every folder with how many files it holds, defaults first in checklist order."""
-    files = db.execute(select(File.logical_path, File.document_tag).where(File.customer_id == customer_id)).all()
+    files = db.execute(select(File.logical_path, File.document_tag).where(File.customer_id == customer_id, current_only())).all()
     counts: dict[str, int] = {}
     for path, tag in files:
         folder = folder_of(path, tag)
